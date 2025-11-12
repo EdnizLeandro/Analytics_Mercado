@@ -7,11 +7,20 @@ import streamlit as st
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score, mean_absolute_error
 
+# --- SUPRESSÃO DE WARNINGS E LOGS ---
 warnings.filterwarnings("ignore")
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 logging.getLogger('tensorflow').setLevel(logging.ERROR)
 logging.getLogger('prophet').setLevel(logging.ERROR)
 
+# --- TENTA GARANTIR openpyxl ---
+try:
+    import openpyxl
+except ImportError:
+    st.error("O pacote 'openpyxl' é necessário para ler arquivos Excel (.xlsx). Instale com 'pip install openpyxl' ou adicione ao requirements.txt.")
+    st.stop()
+
+# --- IMPORTA MODELOS AVANÇADOS ---
 try:
     from statsmodels.tsa.holtwinters import ExponentialSmoothing
     from statsmodels.tsa.arima.model import ARIMA
@@ -87,14 +96,12 @@ class MercadoTrabalhoStreamlit:
 
         # Ajusta o DataFrame dos códigos
         self.df_cbo.columns = [col.strip().lower() for col in self.df_cbo.columns]
-        # Tenta identificar coluna de código e descrição
         cbo_cod_col = next((c for c in self.df_cbo.columns if 'cbo' in c and ('código' in c or 'codigo' in c or 'cod' in c)), self.df_cbo.columns[0])
         cbo_desc_col = next((c for c in self.df_cbo.columns if 'descri' in c), self.df_cbo.columns[-1])
         self.df_cbo = self.df_cbo.rename(columns={cbo_cod_col: "cbo_codigo", cbo_desc_col: "cbo_descricao"})
         self.df_cbo['cbo_codigo'] = self.df_cbo['cbo_codigo'].astype(str)
 
     def buscar_profissao(self, entrada: str) -> pd.DataFrame:
-        # Busca primeiro por código exato na CBO.xlsx
         entrada = entrada.strip()
         if entrada.isdigit():
             resultados = self.df_cbo[self.df_cbo['cbo_codigo'] == entrada]
@@ -312,7 +319,7 @@ filepath = os.path.join(os.path.dirname(__file__), "dados.parquet")
 cbopath = os.path.join(os.path.dirname(__file__), "CBO.xlsx")
 
 df = pd.read_parquet(filepath)
-df_cbo = pd.read_excel(cbopath)
+df_cbo = pd.read_excel(cbopath, engine="openpyxl")
 
 app = MercadoTrabalhoStreamlit(df, df_cbo)
 
@@ -325,7 +332,6 @@ if entrada:
         st.write(f"**{len(resultados)} profissão(ões) encontrada(s):**")
         for index, row in resultados.iterrows():
             st.write(f"- [{row['cbo_codigo']}] {row['cbo_descricao']}")
-        # Solicita escolha se múltiplos encontrados
         if len(resultados) == 1:
             cbo = resultados["cbo_codigo"].iloc[0]
         else:
