@@ -7,20 +7,20 @@ import streamlit as st
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score, mean_absolute_error
 
-# --- SUPRESSÃO DE WARNINGS E LOGS ---
+# Supressão de warnings e logs excessivos
 warnings.filterwarnings("ignore")
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 logging.getLogger('tensorflow').setLevel(logging.ERROR)
 logging.getLogger('prophet').setLevel(logging.ERROR)
 
-# --- TENTA GARANTIR openpyxl ---
+# Confere dependência do openpyxl (necessário para ler .xlsx)
 try:
     import openpyxl
 except ImportError:
-    st.error("O pacote 'openpyxl' é necessário para ler arquivos Excel (.xlsx). Instale com 'pip install openpyxl' ou adicione ao requirements.txt.")
+    st.error("O pacote 'openpyxl' é necessário para ler Excel. Instale com 'pip install openpyxl'!")
     st.stop()
 
-# --- IMPORTA MODELOS AVANÇADOS ---
+# Importa modelos avançados
 try:
     from statsmodels.tsa.holtwinters import ExponentialSmoothing
     from statsmodels.tsa.arima.model import ARIMA
@@ -39,6 +39,7 @@ except Exception as e:
     st.error(f"Erro ao importar bibliotecas de previsão: {e}")
     st.stop()
 
+# Funções utilitárias
 def formatar_moeda(valor):
     try:
         return f"{float(valor):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -64,6 +65,7 @@ def safe_forecast_list(forecast_list):
         safe.append(vv)
     return safe
 
+# Classe principal
 class MercadoTrabalhoStreamlit:
     def __init__(self, df, df_cbo):
         self.df = df
@@ -310,16 +312,29 @@ class MercadoTrabalhoStreamlit:
             else:
                 plot_area.warning("Nenhum modelo gerou resultados válidos.")
 
-# ----------- STREAMLIT APP -----------
+# --------- INÍCIO DO APP STREAMLIT ---------
 st.set_page_config(page_title="Mercado de Trabalho Avançado", layout="wide")
 st.title("📊 Análise Avançada do Mercado de Trabalho")
 st.write("Digite nome ou código da profissão para previsões detalhadas.")
 
+# Verifica e carrega arquivos de dados
 filepath = os.path.join(os.path.dirname(__file__), "dados.parquet")
 cbopath = os.path.join(os.path.dirname(__file__), "CBO.xlsx")
 
+if not os.path.isfile(filepath):
+    st.error(f"O arquivo {filepath} não foi encontrado.")
+    st.stop()
+
+if not os.path.isfile(cbopath):
+    st.error(f"O arquivo {cbopath} não foi encontrado.")
+    st.stop()
+
 df = pd.read_parquet(filepath)
 df_cbo = pd.read_excel(cbopath, engine="openpyxl")
+
+# Mostra colunas para debug
+st.write("Colunas do dados.parquet:", df.columns.tolist())
+st.write("Colunas do CBO.xlsx:", df_cbo.columns.tolist())
 
 app = MercadoTrabalhoStreamlit(df, df_cbo)
 
