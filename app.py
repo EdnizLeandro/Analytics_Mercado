@@ -32,7 +32,7 @@ st.markdown(
 def carregar_dados():
     try:
         base_path = os.path.dirname(__file__)
-        dados_path = os.path.join(base_path, "dado.parquet")
+        dados_path = os.path.join(base_path, "dados.parquet")
         codigos_path = os.path.join(base_path, "codigos.xlsx")
 
         df = pd.read_parquet(dados_path)
