@@ -7,11 +7,13 @@ import streamlit as st
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score, mean_absolute_error
 
+# SUPRESSÃO DE WARNINGS E LOGS
 warnings.filterwarnings("ignore")
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 logging.getLogger('tensorflow').setLevel(logging.ERROR)
 logging.getLogger('prophet').setLevel(logging.ERROR)
 
+# IMPORTA MODELOS AVANÇADOS
 try:
     from statsmodels.tsa.holtwinters import ExponentialSmoothing
     from statsmodels.tsa.arima.model import ARIMA
@@ -30,6 +32,7 @@ except Exception as e:
     st.error(f"Erro ao importar bibliotecas de previsão: {e}")
     st.stop()
 
+# FUNÇÕES UTILITÁRIAS
 def formatar_moeda(valor):
     try:
         return f"{float(valor):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -55,6 +58,7 @@ def safe_forecast_list(forecast_list):
         safe.append(vv)
     return safe
 
+# CLASSE PRINCIPAL
 class MercadoTrabalhoStreamlit:
     def __init__(self, df):
         self.df = df
@@ -85,10 +89,13 @@ class MercadoTrabalhoStreamlit:
         self.cleaned = True
 
     def buscar_profissao(self, entrada: str) -> pd.DataFrame:
+        col = self.coluna_cbo
+        # Converte todos os valores para string antes de filtrar
+        self.df[col] = self.df[col].astype(str)
         if entrada.isdigit():
-            resultados = self.df[self.df[self.coluna_cbo].astype(str) == entrada]
+            resultados = self.df[self.df[col] == entrada]
         else:
-            resultados = self.df[self.df[self.coluna_cbo].str.contains(entrada, case=False, na=False)]
+            resultados = self.df[self.df[col].str.contains(entrada, case=False, na=False)]
         return resultados
 
     def converter_data(self, df_cbo):
@@ -102,6 +109,7 @@ class MercadoTrabalhoStreamlit:
                 df_cbo['ano'] = df_cbo.loc[mask_yyyymm, col].str[:4].astype(int)
                 df_cbo['mes'] = df_cbo.loc[mask_yyyymm, col].str[4:6].astype(int)
             else:
+                # Se não está no formato, tenta converter qualquer coisa razoável
                 df_cbo['ano'] = pd.to_datetime(df_cbo[col], errors='coerce').dt.year
                 df_cbo['mes'] = pd.to_datetime(df_cbo[col], errors='coerce').dt.month
             df_cbo['data_convertida'] = pd.to_datetime(dict(year=df_cbo['ano'], month=df_cbo['mes'], day=1))
@@ -138,8 +146,8 @@ class MercadoTrabalhoStreamlit:
         except:
             resultados['ARIMA'] = None
 
-        # AutoARIMA
-        if PMDARIMA_OK:
+        # AutoARIMA (opcional)
+        if 'PMDARIMA_OK' in globals() and PMDARIMA_OK:
             try:
                 model_auto = auto_arima(y, seasonal=True, m=12, suppress_warnings=True)
                 y_pred = model_auto.predict_in_sample()
@@ -203,7 +211,6 @@ class MercadoTrabalhoStreamlit:
                 X_lstm = df_lstm[[f'lag_{i}' for i in range(1, self.lstm_lag + 1)]].values
                 Y = df_lstm['valor'].values
                 X_lstm = X_lstm.reshape((X_lstm.shape[0], X_lstm.shape[1], 1))
-
                 if self.lstm_model is None:
                     model = Sequential()
                     model.add(LSTM(50, input_shape=(X_lstm.shape[1], 1)))
@@ -255,7 +262,7 @@ class MercadoTrabalhoStreamlit:
             st.warning("Nenhum dado disponível para análise.")
             return
         st.subheader("Análise Salarial - Previsão Avançada")
-        plot_area = st.empty()  # Reservar espaço fixo para gráfico ou info
+        plot_area = st.empty()
         df_cbo = self.converter_data(df_cbo)
         if df_cbo.empty or df_cbo['data_convertida'].isnull().all():
             plot_area.warning("Dados de datas inválidos para previsão.")
