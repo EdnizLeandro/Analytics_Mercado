@@ -1,7 +1,9 @@
 streamlit
 pandas
 numpy
-scikit-learn
 matplotlib
+scikit-learn
 openpyxl
 statsmodels
+prophet
+xgboost
