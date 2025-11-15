@@ -1,11 +1,15 @@
+import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.linear_model import LinearRegression
 import matplotlib.pyplot as plt
 
+# ==========================================
+# Classe principal
+# ==========================================
 class MercadoTrabalhoPredictor:
-    def __init__(self, filepath, codigos_filepath):
-        self.filepath = filepath
+    def __init__(self, csv_files, codigos_filepath):
+        self.csv_files = csv_files
         self.codigos_filepath = codigos_filepath
         self.df = None
         self.df_codigos = None
@@ -18,7 +22,11 @@ class MercadoTrabalhoPredictor:
         return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
     def carregar_dados(self):
-        self.df = pd.read_parquet(self.filepath)
+        # Lê e concatena todos os CSVs recebidos
+        dfs = []
+        for file in self.csv_files:
+            dfs.append(pd.read_csv(file))
+        self.df = pd.concat(dfs, ignore_index=True)
         self.df_codigos = pd.read_excel(self.codigos_filepath)
         self.df_codigos.columns = ['cbo_codigo', 'cbo_descricao']
         self.df_codigos['cbo_codigo'] = self.df_codigos['cbo_codigo'].astype(str)
@@ -60,10 +68,8 @@ class MercadoTrabalhoPredictor:
             return None, None
         df_cbo[self.coluna_data] = pd.to_datetime(df_cbo[self.coluna_data], errors='coerce')
         df_cbo = df_cbo.dropna(subset=[self.coluna_data])
-        df_cbo['tempo_meses'] = (
-            (df_cbo[self.coluna_data].dt.year - 2020) * 12 +
-            df_cbo[self.coluna_data].dt.month
-        )
+        df_cbo['tempo_meses'] = ((df_cbo[self.coluna_data].dt.year - 2020) * 12 +
+                                  df_cbo[self.coluna_data].dt.month)
         df_mensal = df_cbo.groupby('tempo_meses')[self.coluna_salario].mean().reset_index()
         X = df_mensal[['tempo_meses']]
         y = df_mensal[self.coluna_salario]
@@ -78,33 +84,51 @@ class MercadoTrabalhoPredictor:
             previsoes.append((anos, pred, ((pred - salario_atual) / salario_atual) * 100))
         return df_mensal, previsoes
 
-# Executa a lógica principal
-if __name__ == "__main__":
-    dados_file = "dados.parquet"
-    codigos_file = "cbo.xlsx"
-    app = MercadoTrabalhoPredictor(dados_file, codigos_file)
-    app.carregar_dados()
-    app.limpar_dados()
+# ==========================================
+# Interface Streamlit
+# ==========================================
+st.set_page_config(page_title="Previsão do Mercado de Trabalho", layout="wide")
+st.title("📊 Previsão do Mercado de Trabalho")
+st.markdown("Analise tendências salariais e de emprego com base nos dados do CAGED/CBO.")
 
-    entrada = input("Digite o nome ou código da profissão: ")
-    resultados = app.buscar_profissao(entrada)
-    if resultados.empty:
-        print("Nenhuma profissão encontrada.")
-    else:
-        print(resultados.to_string(index=False))
-        cbo_codigo = resultados.iloc[0]['cbo_codigo']
-        df_mensal, previsoes = app.prever_mercado(cbo_codigo)
-        if df_mensal is None:
-            print("Sem dados suficientes para prever.")
+# Uploads para seis arquivos .csv
+csv_files = st.file_uploader(
+    "Envie até 6 arquivos de dados (.csv)", type=["csv"], accept_multiple_files=True)
+codigos_file = st.file_uploader("Envie o arquivo de CBO (.xlsx)", type=["xlsx"])
+
+if csv_files and len(csv_files) == 6 and codigos_file:
+    with st.spinner("Carregando e preparando dados..."):
+        app = MercadoTrabalhoPredictor(csv_files, codigos_file)
+        app.carregar_dados()
+        app.limpar_dados()
+    st.success("✅ Dados carregados e preparados!")
+    busca = st.text_input("🔍 Digite o nome ou código da profissão:")
+    if busca:
+        resultados = app.buscar_profissao(busca)
+        if resultados.empty:
+            st.warning("Nenhuma profissão encontrada.")
         else:
-            print("\nEvolução Salarial Média:")
-            print(df_mensal)
-            print("\nProjeções Futuras:")
-            for anos, valor, variacao in previsoes:
-                print(f"{anos} anos → R$ {app.formatar_moeda(valor)} ({variacao:+.1f}%)")
-            # Plot gráfico se desejar
-            plt.plot(df_mensal['tempo_meses'], df_mensal[app.coluna_salario], marker='o')
-            plt.xlabel("Tempo (meses desde 2020)")
-            plt.ylabel("Salário Médio (R$)")
-            plt.title("Tendência Histórica de Salário")
-            plt.show()
+            cbo_opcao = st.selectbox(
+                "Selecione o CBO:",
+                resultados['cbo_codigo'] + " - " + resultados['cbo_descricao']
+            )
+            cbo_codigo = cbo_opcao.split(" - ")[0]
+            if st.button("Gerar Previsão"):
+                df_mensal, previsoes = app.prever_mercado(cbo_codigo)
+                if df_mensal is None:
+                    st.error("Sem dados suficientes para prever.")
+                else:
+                    st.subheader("📈 Evolução Salarial Média")
+                    fig, ax = plt.subplots()
+                    ax.plot(df_mensal['tempo_meses'], df_mensal[app.coluna_salario], marker='o')
+                    ax.set_xlabel("Tempo (meses desde 2020)")
+                    ax.set_ylabel("Salário Médio (R$)")
+                    ax.set_title("Tendência Histórica de Salário")
+                    st.pyplot(fig)
+                    st.subheader("🔮 Projeções Futuras")
+                    for anos, valor, variacao in previsoes:
+                        st.write(f"**{anos} anos → R$ {app.formatar_moeda(valor)} ({variacao:+.1f}%)**")
+elif csv_files and len(csv_files) < 6:
+    st.info("Por favor, envie os 6 arquivos de dados.")
+else:
+    st.info("Envie os arquivos de dados (.csv) e de CBO (.xlsx) para iniciar.")
