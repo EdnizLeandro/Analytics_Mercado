@@ -122,6 +122,16 @@ class MercadoTrabalhoPredictor:
             else: msg += " → Mercado estável"
             st.markdown(msg, unsafe_allow_html=True)
 
+        # PREPROCESSAMENTO DE SALÁRIO (CORREÇÃO DO ERRO)
+        df_cbo[self.coluna_salario] = pd.to_numeric(
+            df_cbo[self.coluna_salario]
+                .astype(str)
+                .str.replace(",", ".")
+                .str.replace(" ", ""),
+            errors='coerce'
+        )
+        df_cbo = df_cbo.dropna(subset=[self.coluna_salario])
+
         # Previsão salarial
         st.subheader("Previsão Salarial")
         df_cbo[self.coluna_data] = pd.to_datetime(df_cbo[self.coluna_data], errors='coerce')
