@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 from sklearn.linear_model import LinearRegression
+import streamlit as st
 
 class MercadoTrabalhoPredictor:
     def __init__(self, csv_files: list, codigos_filepath: str):
@@ -17,18 +18,13 @@ class MercadoTrabalhoPredictor:
         return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
     def carregar_dados(self):
-        print("Etapa 1: Carregando datasets .csv...")
         dfs = [pd.read_csv(path, encoding='utf-8', sep=';', on_bad_lines='skip') for path in self.csv_files]
         self.df = pd.concat(dfs, ignore_index=True)
-        print(f"Dataset carregado com {self.df.shape[0]} linhas e {self.df.shape[1]} colunas.")
-        print("Carregando lista de códigos CBO...")
         self.df_codigos = pd.read_excel(self.codigos_filepath)
         self.df_codigos.columns = ['cbo_codigo', 'cbo_descricao']
         self.df_codigos['cbo_codigo'] = self.df_codigos['cbo_codigo'].astype(str)
-        print(f"{len(self.df_codigos)} profissões carregadas.\n")
 
     def limpar_dados(self):
-        print("Etapa 2: Limpando dataset...")
         obj_cols = [col for col in self.df.columns if self.df[col].dtype == 'object']
         for col in obj_cols:
             self.df[col] = self.df[col].astype(str)
@@ -37,180 +33,126 @@ class MercadoTrabalhoPredictor:
         self.df.drop_duplicates(inplace=True)
         self.df.reset_index(drop=True, inplace=True)
         self.cleaned = True
-        print(f"Limpeza finalizada! Dataset agora tem {self.df.shape[0]} linhas e {self.df.shape[1]} colunas.\n")
-        print("Identificando colunas...")
         self._identificar_colunas()
 
     def _identificar_colunas(self):
-        # Usa os nomes exatos do seu arquivo
         self.coluna_cbo = "cbo2002ocupação"
         self.coluna_data = "competênciamov"
         self.coluna_salario = "salário"
-        print(f"  ✓ Coluna CBO: {self.coluna_cbo}")
-        print(f"  ✓ Coluna DATA: {self.coluna_data}")
-        print(f"  ✓ Coluna SALÁRIO: {self.coluna_salario}\n")
 
     def buscar_profissao(self, entrada: str) -> pd.DataFrame:
         if not self.cleaned:
-            print("Limpe o dataset antes de buscar profissões.")
             return pd.DataFrame()
-        print(f"Etapa 3: Buscando '{entrada}'...")
         if entrada.isdigit():
-            resultados = self.df_codigos[self.df_codigos['cbo_codigo'] == entrada]
-            if not resultados.empty:
-                print(f"CBO {entrada} encontrado: {resultados.iloc[0]['cbo_descricao']}\n")
-                return resultados
-            else:
-                print("Código CBO não encontrado.\n")
-                return pd.DataFrame()
+            return self.df_codigos[self.df_codigos['cbo_codigo'] == entrada]
         mask = self.df_codigos['cbo_descricao'].str.contains(entrada, case=False, na=False)
-        resultados = self.df_codigos[mask]
-        if resultados.empty:
-            print("Nenhuma profissão encontrada com esse nome.\n")
-        else:
-            print(f"{len(resultados)} profissão(ões) encontrada(s):\n")
-            for idx, row in resultados.iterrows():
-                print(f"  [{row['cbo_codigo']}] {row['cbo_descricao']}")
-            print()
-        return resultados
+        return self.df_codigos[mask]
 
-    def prever_mercado(self, cbo_codigo: str, anos_futuros=[5, 10, 15, 20]):
-        if not self.cleaned:
-            print("Dataset não limpo.")
+    def relatorio_previsao(self, cbo_codigo: str, anos_futuros=[5, 10, 15, 20]):
+        if not self.cleaned or not all([self.coluna_cbo, self.coluna_data, self.coluna_salario]):
+            st.warning("Colunas não identificadas.")
             return
-        if not all([self.coluna_cbo, self.coluna_data, self.coluna_salario]):
-            print("Colunas não identificadas.")
-            return
-        print(f"Etapa 4: Prevendo mercado para CBO {cbo_codigo}...")
+
         prof_info = self.df_codigos[self.df_codigos['cbo_codigo'] == cbo_codigo]
         if not prof_info.empty:
-            print(f"Profissão: {prof_info.iloc[0]['cbo_descricao']}\n")
-        print(f"Filtrando dados para CBO {cbo_codigo}...")
+            st.subheader(f"Profissão selecionada: {prof_info.iloc[0]['cbo_descricao']}")
+
         df_cbo = self.df[self.df[self.coluna_cbo].astype(str) == cbo_codigo].copy()
         if df_cbo.empty:
-            print("Nenhum registro encontrado.\n")
+            st.warning("Nenhum registro encontrado para a profissão selecionada.")
             return
-        print(f"{len(df_cbo):,} registros encontrados.\n")
-        print("="*70)
-        print("ANÁLISE DO MERCADO DE TRABALHO")
-        print("="*70)
+
+        st.write(f"**Registros encontrados:** {len(df_cbo):,}")
+
+        # Perfil demográfico
+        with st.expander("Perfil Demográfico"):
+            if 'idade' in df_cbo.columns:
+                idade_media = df_cbo['idade'].astype(float).mean()
+                st.write(f"Idade média: {idade_media:.1f} anos")
+            if 'sexo' in df_cbo.columns:
+                sexo_dist = df_cbo['sexo'].value_counts()
+                sexo_lista = [
+                    f"{'Masculino' if str(sex)=='1.0' else 'Feminino' if str(sex)=='3.0' else str(sex)}: {(count/len(df_cbo))*100:.1f}%"
+                    for sex,count in sexo_dist.items()
+                ]
+                st.write("Distribuição por sexo:", ", ".join(sexo_lista))
+            if 'graudeinstrucao' in df_cbo.columns:
+                escolaridade = df_cbo['graudeinstrucao'].value_counts().head(3)
+                escolaridade_map = {
+                    '1': 'Analfabeto','2': 'Até 5ª inc. Fundamental','3': '5ª completo Fundamental',
+                    '4': '6ª a 9ª Fundamental','5': 'Fundamental completo','6': 'Médio incompleto',
+                    '7': 'Médio completo','8': 'Superior incompleto','9': 'Superior completo',
+                    '10': 'Mestrado','11': 'Doutorado','80': 'Pós-graduação'
+                }
+                esc_strings = []
+                for nivel,count in escolaridade.items():
+                    try:
+                        nivel_nome = escolaridade_map.get(str(int(float(nivel))), str(nivel))
+                    except:
+                        nivel_nome = str(nivel)
+                    esc_strings.append(f"{nivel_nome}: {(count/len(df_cbo))*100:.1f}%")
+                st.write("Principais níveis:", ", ".join(esc_strings))
+            if 'uf' in df_cbo.columns:
+                uf_map = {'11':'RO','12':'AC','13':'AM','14':'RR','15':'PA','16':'AP','17':'TO','21':'MA','22':'PI','23':'CE','24':'RN','25':'PB','26':'PE','27':'AL','28':'SE','29':'BA','31':'MG','32':'ES','33':'RJ','35':'SP','41':'PR','42':'SC','43':'RS','50':'MS','51':'MT','52':'GO','53':'DF'}
+                uf_dist = df_cbo['uf'].value_counts().head(5)
+                uf_lista = []
+                for uf_cod,count in uf_dist.items():
+                    try: uf_nome = uf_map.get(str(int(float(uf_cod))),str(uf_cod))
+                    except: uf_nome = str(uf_cod)
+                    uf_lista.append(f"{uf_nome}: {count:,} ({(count/len(df_cbo))*100:.1f}%)")
+                st.write("Principais UF:", ", ".join(uf_lista))
+
+        # Saldo de movimentação
         if 'saldomovimentação' in df_cbo.columns:
-            saldo_total = df_cbo['saldomovimentação'].sum()
-            print(f"\nSALDO DE MOVIMENTAÇÃO (Admissões - Desligamentos):")
-            print(f"   • Saldo total no período: {saldo_total:+,.0f} postos de trabalho")
-            if saldo_total > 0:
-                print(f"   Mercado em EXPANSÃO (mais admissões que desligamentos)")
-            elif saldo_total < 0:
-                print(f"   Mercado em RETRAÇÃO (mais desligamentos que admissões)")
-            else:
-                print(f"   ➡️ Mercado ESTÁVEL")
+            saldo_total = df_cbo['saldomovimentação'].astype(float).sum()
+            msg = f"**Saldo movimentação (adm-desl):** {saldo_total:+,.0f}"
+            if saldo_total > 0: msg += " → Mercado em expansão"
+            elif saldo_total < 0: msg += " → Mercado em retração"
+            else: msg += " → Mercado estável"
+            st.markdown(msg)
 
-        print(f"\nPERFIL DEMOGRÁFICO:")
-        if 'idade' in df_cbo.columns:
-            idade_media = df_cbo['idade'].mean()
-            print(f"   • Idade média: {idade_media:.1f} anos")
-        if 'sexo' in df_cbo.columns:
-            sexo_dist = df_cbo['sexo'].value_counts()
-            print(f"   • Distribuição por sexo:")
-            for sexo, count in sexo_dist.items():
-                pct = (count / len(df_cbo)) * 100
-                sexo_label = "Masculino" if str(sexo) == "1.0" else "Feminino" if str(sexo) == "3.0" else sexo
-                print(f"      - {sexo_label}: {pct:.1f}%")
-        if 'graudeinstrucao' in df_cbo.columns:
-            escolaridade = df_cbo['graudeinstrucao'].value_counts().head(3)
-            print(f"   • Principais níveis de escolaridade:")
-            escolaridade_map = {
-                '1': 'Analfabeto',
-                '2': 'Até 5ª inc. Fundamental',
-                '3': '5ª completo Fundamental',
-                '4': '6ª a 9ª Fundamental',
-                '5': 'Fundamental completo',
-                '6': 'Médio incompleto',
-                '7': 'Médio completo',
-                '8': 'Superior incompleto',
-                '9': 'Superior completo',
-                '10': 'Mestrado',
-                '11': 'Doutorado',
-                '80': 'Pós-graduação'
-            }
-            for nivel, count in escolaridade.items():
-                pct = (count / len(df_cbo)) * 100
-                try:
-                    nivel_nome = escolaridade_map.get(str(int(float(nivel))), str(nivel))
-                except:
-                    nivel_nome = str(nivel)
-                print(f"      - {nivel_nome}: {pct:.1f}%")
-        if 'uf' in df_cbo.columns:
-            print(f"\nDISTRIBUIÇÃO GEOGRÁFICA:")
-            uf_map = {
-                '11': 'RO', '12': 'AC', '13': 'AM', '14': 'RR', '15': 'PA', '16': 'AP', '17': 'TO',
-                '21': 'MA', '22': 'PI', '23': 'CE', '24': 'RN', '25': 'PB', '26': 'PE', '27': 'AL',
-                '28': 'SE', '29': 'BA', '31': 'MG', '32': 'ES', '33': 'RJ', '35': 'SP', '41': 'PR',
-                '42': 'SC', '43': 'RS', '50': 'MS', '51': 'MT', '52': 'GO', '53': 'DF'
-            }
-            uf_dist = df_cbo['uf'].value_counts().head(5)
-            for uf_cod, count in uf_dist.items():
-                pct = (count / len(df_cbo)) * 100
-                try:
-                    uf_nome = uf_map.get(str(int(float(uf_cod))), str(uf_cod))
-                except:
-                    uf_nome = str(uf_cod)
-                print(f"   • {uf_nome}: {count:,} registros ({pct:.1f}%)")
-        if 'tipoempregador' in df_cbo.columns:
-            print(f"\nTIPO DE EMPREGADOR:")
-            tipo_map = {'0': 'CNPJ', '1': 'CPF', '2': 'CNO (Obra)', '3': 'CAEPF'}
-            tipo_emp = df_cbo['tipoempregador'].value_counts().head(3)
-            for tipo, count in tipo_emp.items():
-                pct = (count / len(df_cbo)) * 100
-                try:
-                    tipo_nome = tipo_map.get(str(int(float(tipo))), str(tipo))
-                except:
-                    tipo_nome = str(tipo)
-                print(f"   • {tipo_nome}: {pct:.1f}%")
-
-        print(f"\n{'='*70}")
-        print("PREVISÃO SALARIAL")
-        print("="*70)
-
-        # Conversão robusta do salário para float
+        # Converter salário para número
         df_cbo[self.coluna_salario] = pd.to_numeric(
-            df_cbo[self.coluna_salario].astype(str).str.replace(",", ".").str.replace(" ", ""),
+            df_cbo[self.coluna_salario]
+            .astype(str)
+            .str.replace(",", ".")
+            .str.replace(" ", ""),
             errors='coerce'
         )
         df_cbo = df_cbo.dropna(subset=[self.coluna_salario])
 
+        # Previsão salarial
+        st.subheader("Previsão Salarial")
         df_cbo[self.coluna_data] = pd.to_datetime(df_cbo[self.coluna_data], errors='coerce')
         df_cbo = df_cbo.dropna(subset=[self.coluna_data])
         if df_cbo.empty:
-            print("Não há dados temporais válidos.\n")
+            st.warning("Não há dados temporais válidos.")
             return
         df_cbo['tempo_meses'] = ((df_cbo[self.coluna_data].dt.year - 2020) * 12 +
-                                  df_cbo[self.coluna_data].dt.month)
+                                 df_cbo[self.coluna_data].dt.month)
         df_mensal = df_cbo.groupby('tempo_meses')[self.coluna_salario].mean().reset_index()
         salario_atual = df_cbo[self.coluna_salario].mean()
-        print(f"\nSalário médio atual: R$ {self.formatar_moeda(salario_atual)}")
-        if len(df_mensal) < 2:
-            print(f"Previsão baseada na média atual:")
-            for anos in anos_futuros:
-                print(f"  {anos} anos → R$ {self.formatar_moeda(salario_atual)}")
-        else:
+        st.write(f"Salário médio atual: R$ {self.formatar_moeda(salario_atual)}")
+        if len(df_mensal) >= 2:
             X = df_mensal[['tempo_meses']]
             y = df_mensal[self.coluna_salario]
             model = LinearRegression()
             model.fit(X, y)
-            print(f"Período analisado: {df_cbo[self.coluna_data].min().strftime('%m/%Y')} a {df_cbo[self.coluna_data].max().strftime('%m/%Y')}")
             ult_mes = df_mensal['tempo_meses'].max()
-            print(f"\nPrevisões de salário médio:")
+            previsoes = []
             for anos in anos_futuros:
                 mes_futuro = ult_mes + anos * 12
                 pred = model.predict(np.array([[mes_futuro]]))[0]
                 variacao = ((pred - salario_atual) / salario_atual) * 100
-                print(f"  {anos} anos → R$ {self.formatar_moeda(max(pred, 0))} ({variacao:+.1f}%)")
+                previsoes.append((anos, self.formatar_moeda(max(pred,0)), f"{variacao:+.1f}%"))
+            st.write("Tabela de previsão salarial (anos | valor | variação):")
+            st.table(pd.DataFrame(previsoes, columns=["Anos","Valor Previsto","Variação"]))
+        else:
+            st.info("Previsão baseada apenas na média atual.")
 
+        # Tendência do mercado (saldo de movimentação)
         if 'saldomovimentação' in df_cbo.columns:
-            print(f"\n{'='*70}")
-            print("PREVISÃO DE TENDÊNCIA DO MERCADO")
-            print("="*70)
+            st.subheader("Tendência de vagas")
             df_saldo_mensal = df_cbo.groupby('tempo_meses')['saldomovimentação'].sum().reset_index()
             if len(df_saldo_mensal) >= 2:
                 X_saldo = df_saldo_mensal[['tempo_meses']]
@@ -218,66 +160,57 @@ class MercadoTrabalhoPredictor:
                 model_saldo = LinearRegression()
                 model_saldo.fit(X_saldo, y_saldo)
                 ult_mes = df_saldo_mensal['tempo_meses'].max()
+                tendencia_lista = []
                 for anos in anos_futuros:
                     mes_futuro = ult_mes + anos * 12
                     pred_saldo = model_saldo.predict(np.array([[mes_futuro]]))[0]
-                    if pred_saldo > 100:
-                        tendencia, descricao = "ALTA DEMANDA", "Forte crescimento esperado"
-                    elif pred_saldo > 50:
-                        tendencia, descricao = "CRESCIMENTO MODERADO", "Expansão gradual"
-                    elif pred_saldo > 0:
-                        tendencia, descricao = "CRESCIMENTO LEVE", "Pequena expansão"
-                    elif pred_saldo > -50:
-                        tendencia, descricao = "RETRAÇÃO LEVE", "Pequena diminuição"
-                    elif pred_saldo > -100:
-                        tendencia, descricao = "RETRAÇÃO MODERADA", "Redução gradual"
-                    else:
-                        tendencia, descricao = "RETRAÇÃO FORTE", "Forte diminuição"
-                    print(f"  {anos} anos → {pred_saldo:+,.0f} vagas/mês - {tendencia}")
-                    print(f"           {descricao}")
+                    if pred_saldo > 100: tendencia = "ALTA DEMANDA"
+                    elif pred_saldo > 50: tendencia = "CRESCIMENTO MODERADO"
+                    elif pred_saldo > 0: tendencia = "CRESCIMENTO LEVE"
+                    elif pred_saldo > -50: tendencia = "RETRAÇÃO LEVE"
+                    elif pred_saldo > -100: tendencia = "RETRAÇÃO MODERADA"
+                    else: tendencia = "RETRAÇÃO FORTE"
+                    tendencia_lista.append((anos, f"{pred_saldo:+,.0f}", tendencia))
+                st.write("Tabela previsão de vagas (anos | vagas/mês | tendência):")
+                st.table(pd.DataFrame(tendencia_lista, columns=["Anos","Vagas Previstas","Tendência"]))
             else:
-                saldo_total = df_cbo['saldomovimentação'].sum()
-                if saldo_total > 100:
-                    base_tendencia, base_descricao = "ALTA DEMANDA", "Mercado em expansão"
-                elif saldo_total > 0:
-                    base_tendencia, base_descricao = "CRESCIMENTO LEVE", "Mercado em leve crescimento"
-                elif saldo_total > -100:
-                    base_tendencia, base_descricao = "RETRAÇÃO LEVE", "Mercado em leve retração"
-                else:
-                    base_tendencia, base_descricao = "RETRAÇÃO FORTE", "Mercado em retração"
-                print(f"   Status atual: {base_tendencia} ({base_descricao})")
-                print(f"\nProjeção (mantendo tendência atual):")
-                for anos in anos_futuros:
-                    print(f"  {anos} anos → {base_tendencia}")
-        print("\n" + "="*70 + "\n")
+                saldo_total = df_cbo['saldomovimentação'].astype(float).sum()
+                if saldo_total > 100: tendencia = "ALTA DEMANDA"
+                elif saldo_total > 0: tendencia = "CRESCIMENTO LEVE"
+                elif saldo_total > -100: tendencia = "RETRAÇÃO LEVE"
+                else: tendencia = "RETRAÇÃO FORTE"
+                st.info(f"Status atual: {tendencia} — Projeção baseada na tendência média.")
 
-def main():
-    csv_files = [
-        "2020_PE1.csv",
-        "2021_PE1.csv",
-        "2022_PE1.csv",
-        "2023_PE1.csv",
-        "2024_PE1.csv",
-        "2025_PE1.csv"
-    ]
-    codigos_filepath = "cbo.xlsx"
+# --- Streamlit Interface ---
+st.set_page_config(page_title="Previsão Mercado de Trabalho", layout="wide")
+st.title("📊 Previsão do Mercado de Trabalho")
+
+csv_files = [
+    "2020_PE1.csv",
+    "2021_PE1.csv",
+    "2022_PE1.csv",
+    "2023_PE1.csv",
+    "2024_PE1.csv",
+    "2025_PE1.csv"
+]
+codigos_filepath = "cbo.xlsx"
+
+with st.spinner("Carregando arquivos e preparando dados..."):
     app = MercadoTrabalhoPredictor(csv_files, codigos_filepath)
     app.carregar_dados()
     app.limpar_dados()
-    while True:
-        entrada = input("Digite o nome ou código da profissão (ou 'sair' para encerrar): ").strip()
-        if entrada.lower() == 'sair':
-            print("Encerrando aplicação.")
-            break
-        resultados = app.buscar_profissao(entrada)
-        if resultados.empty:
-            continue
-        if len(resultados) == 1:
-            cbo = resultados['cbo_codigo'].iloc[0]
-            print(f"Código CBO selecionado: {cbo}\n")
-        else:
-            cbo = input("\nDigite o código CBO desejado: ").strip()
-        app.prever_mercado(cbo)
+st.success("Dados prontos!")
 
-if __name__ == "__main__":
-    main()
+busca = st.text_input("🔍 Digite nome ou código da profissão:")
+if busca:
+    resultados = app.buscar_profissao(busca)
+    if resultados.empty:
+        st.warning("Nenhuma profissão encontrada.")
+    else:
+        cbo_opcao = st.selectbox(
+            "Selecione o CBO:",
+            resultados['cbo_codigo'] + " - " + resultados['cbo_descricao']
+        )
+        cbo_codigo = cbo_opcao.split(" - ")[0]
+        if st.button("Gerar análise e previsão"):
+            app.relatorio_previsao(cbo_codigo)
