@@ -18,7 +18,7 @@ class MercadoTrabalhoPredictor:
 
     def carregar_dados(self):
         print("Etapa 1: Carregando datasets .csv...")
-        # Separador padrão dos arquivos do CAGED é ponto-e-vírgula
+        # Ler todos os arquivos CSV usando o separador correto
         dfs = [pd.read_csv(path, encoding='utf-8', sep=';', on_bad_lines='skip') for path in self.csv_files]
         self.df = pd.concat(dfs, ignore_index=True)
         print(f"Dataset carregado com {self.df.shape[0]} linhas e {self.df.shape[1]} colunas.")
@@ -45,22 +45,21 @@ class MercadoTrabalhoPredictor:
         self._identificar_colunas()
 
     def _identificar_colunas(self):
-        nomes = [c.lower().replace(" ", "").replace("_", "").replace("ã","a").replace("ê","e") for c in self.df.columns]
         # CBO
         possiveis_cbo = [c for c in self.df.columns if "cbo" in c.lower() and "ocup" in c.lower()]
         if not possiveis_cbo:
             possiveis_cbo = [c for c in self.df.columns if "cbo" in c.lower()]
         self.coluna_cbo = possiveis_cbo[0] if possiveis_cbo else None
-        # DATA — compatível com "competênciamov", "competencia", "data", "mes"
+        # DATA
         possiveis_data = [c for c in self.df.columns if "compet" in c.lower() and "mov" in c.lower()]
         if not possiveis_data:
             possiveis_data = [c for c in self.df.columns if "compet" in c.lower() or "mes" in c.lower() or "data" in c.lower()]
         self.coluna_data = possiveis_data[0] if possiveis_data else None
-        # SALÁRIO — adapta para nomes variados
-        possiveis_salario = [c for c in self.df.columns if "salario" in c.lower() and ("fixo" in c.lower() or "valor" in c.lower())]
-        if not possiveis_salario:
-            possiveis_salario = [c for c in self.df.columns if "salario" in c.lower()]
-        self.coluna_salario = possiveis_salario[0] if possiveis_salario else None
+        # SALÁRIO (considera acento e variante sem acento)
+        salario_candidates = [c for c in self.df.columns if "salário" in c.lower()]
+        if not salario_candidates:
+            salario_candidates = [c for c in self.df.columns if "salario" in c.lower()]
+        self.coluna_salario = salario_candidates[0] if salario_candidates else None
 
         print(f"  ✓ Coluna CBO: {self.coluna_cbo}")
         print(f"  ✓ Coluna DATA: {self.coluna_data}")
