@@ -38,18 +38,14 @@ class MercadoTrabalhoPredictor:
         self.df.reset_index(drop=True, inplace=True)
         self.cleaned = True
         print(f"Limpeza finalizada! Dataset agora tem {self.df.shape[0]} linhas e {self.df.shape[1]} colunas.\n")
-        print("Identificando colunas automaticamente...")
+        print("Identificando colunas...")
         self._identificar_colunas()
 
     def _identificar_colunas(self):
-        for col in self.df.columns:
-            col_lower = col.lower().replace(' ', '').replace('_', '')
-            if 'cbo' in col_lower and 'ocup' in col_lower:
-                self.coluna_cbo = col
-            if 'competencia' in col_lower and 'mov' in col_lower:
-                self.coluna_data = col
-            if 'salário' in col_lower:
-                self.coluna_salario = col
+        # Usa os nomes exatos do seu arquivo
+        self.coluna_cbo = "cbo2002ocupação"
+        self.coluna_data = "competênciamov"
+        self.coluna_salario = "salário"
         print(f"  ✓ Coluna CBO: {self.coluna_cbo}")
         print(f"  ✓ Coluna DATA: {self.coluna_data}")
         print(f"  ✓ Coluna SALÁRIO: {self.coluna_salario}\n")
@@ -98,8 +94,8 @@ class MercadoTrabalhoPredictor:
         print("="*70)
         print("ANÁLISE DO MERCADO DE TRABALHO")
         print("="*70)
-        if 'saldomovimentacao' in df_cbo.columns:
-            saldo_total = df_cbo['saldomovimentacao'].sum()
+        if 'saldomovimentação' in df_cbo.columns:
+            saldo_total = df_cbo['saldomovimentação'].sum()
             print(f"\nSALDO DE MOVIMENTAÇÃO (Admissões - Desligamentos):")
             print(f"   • Saldo total no período: {saldo_total:+,.0f} postos de trabalho")
             if saldo_total > 0:
@@ -176,7 +172,7 @@ class MercadoTrabalhoPredictor:
         print("PREVISÃO SALARIAL")
         print("="*70)
 
-        # Conversão robusta do salário (trata ',' de decimal, espaços e valores inválidos)
+        # Conversão robusta do salário para float
         df_cbo[self.coluna_salario] = pd.to_numeric(
             df_cbo[self.coluna_salario].astype(str).str.replace(",", ".").str.replace(" ", ""),
             errors='coerce'
@@ -211,17 +207,16 @@ class MercadoTrabalhoPredictor:
                 variacao = ((pred - salario_atual) / salario_atual) * 100
                 print(f"  {anos} anos → R$ {self.formatar_moeda(max(pred, 0))} ({variacao:+.1f}%)")
 
-        if 'saldomovimentacao' in df_cbo.columns:
+        if 'saldomovimentação' in df_cbo.columns:
             print(f"\n{'='*70}")
             print("PREVISÃO DE TENDÊNCIA DO MERCADO")
             print("="*70)
-            df_saldo_mensal = df_cbo.groupby('tempo_meses')['saldomovimentacao'].sum().reset_index()
+            df_saldo_mensal = df_cbo.groupby('tempo_meses')['saldomovimentação'].sum().reset_index()
             if len(df_saldo_mensal) >= 2:
                 X_saldo = df_saldo_mensal[['tempo_meses']]
-                y_saldo = df_saldo_mensal['saldomovimentacao']
+                y_saldo = df_saldo_mensal['saldomovimentação']
                 model_saldo = LinearRegression()
                 model_saldo.fit(X_saldo, y_saldo)
-                print(f"\nTendência de saldo de vagas:")
                 ult_mes = df_saldo_mensal['tempo_meses'].max()
                 for anos in anos_futuros:
                     mes_futuro = ult_mes + anos * 12
@@ -241,7 +236,7 @@ class MercadoTrabalhoPredictor:
                     print(f"  {anos} anos → {pred_saldo:+,.0f} vagas/mês - {tendencia}")
                     print(f"           {descricao}")
             else:
-                saldo_total = df_cbo['saldomovimentacao'].sum()
+                saldo_total = df_cbo['saldomovimentação'].sum()
                 if saldo_total > 100:
                     base_tendencia, base_descricao = "ALTA DEMANDA", "Mercado em expansão"
                 elif saldo_total > 0:
