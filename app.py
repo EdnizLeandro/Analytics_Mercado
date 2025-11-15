@@ -8,9 +8,9 @@ import matplotlib.pyplot as plt
 # Classe principal
 # ==========================================
 class MercadoTrabalhoPredictor:
-    def __init__(self, csv_files, codigos_filepath):
-        self.csv_files = csv_files
-        self.codigos_filepath = codigos_filepath
+    def __init__(self, csv_paths, codigos_path):
+        self.csv_paths = csv_paths
+        self.codigos_path = codigos_path
         self.df = None
         self.df_codigos = None
         self.cleaned = False
@@ -22,12 +22,10 @@ class MercadoTrabalhoPredictor:
         return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
     def carregar_dados(self):
-        # Lê e concatena todos os CSVs recebidos
-        dfs = []
-        for file in self.csv_files:
-            dfs.append(pd.read_csv(file))
+        # Lê e concatena todos os CSVs presentes na pasta
+        dfs = [pd.read_csv(path) for path in self.csv_paths]
         self.df = pd.concat(dfs, ignore_index=True)
-        self.df_codigos = pd.read_excel(self.codigos_filepath)
+        self.df_codigos = pd.read_excel(self.codigos_path)
         self.df_codigos.columns = ['cbo_codigo', 'cbo_descricao']
         self.df_codigos['cbo_codigo'] = self.df_codigos['cbo_codigo'].astype(str)
 
@@ -85,23 +83,29 @@ class MercadoTrabalhoPredictor:
         return df_mensal, previsoes
 
 # ==========================================
-# Interface Streamlit
+# Interface Streamlit (SEM UPLOAD, leitura direta dos arquivos)
 # ==========================================
 st.set_page_config(page_title="Previsão do Mercado de Trabalho", layout="wide")
 st.title("📊 Previsão do Mercado de Trabalho")
 st.markdown("Analise tendências salariais e de emprego com base nos dados do CAGED/CBO.")
 
-# Uploads para seis arquivos .csv
-csv_files = st.file_uploader(
-    "Envie até 6 arquivos de dados (.csv)", type=["csv"], accept_multiple_files=True)
-codigos_file = st.file_uploader("Envie o arquivo de CBO (.xlsx)", type=["xlsx"])
+# Lista de arquivos esperados, todos na mesma pasta do código
+csv_paths = [
+    "2020_PE1.csv",
+    "2021_PE1.csv",
+    "2022_PE1.csv",
+    "2023_PE1.csv",
+    "2024_PE1.csv",
+    "2025_PE1.csv"
+]
+codigos_path = "cbo.xlsx"
 
-if csv_files and len(csv_files) == 6 and codigos_file:
-    with st.spinner("Carregando e preparando dados..."):
-        app = MercadoTrabalhoPredictor(csv_files, codigos_file)
-        app.carregar_dados()
-        app.limpar_dados()
+try:
+    app = MercadoTrabalhoPredictor(csv_paths, codigos_path)
+    app.carregar_dados()
+    app.limpar_dados()
     st.success("✅ Dados carregados e preparados!")
+    
     busca = st.text_input("🔍 Digite o nome ou código da profissão:")
     if busca:
         resultados = app.buscar_profissao(busca)
@@ -128,7 +132,6 @@ if csv_files and len(csv_files) == 6 and codigos_file:
                     st.subheader("🔮 Projeções Futuras")
                     for anos, valor, variacao in previsoes:
                         st.write(f"**{anos} anos → R$ {app.formatar_moeda(valor)} ({variacao:+.1f}%)**")
-elif csv_files and len(csv_files) < 6:
-    st.info("Por favor, envie os 6 arquivos de dados.")
-else:
-    st.info("Envie os arquivos de dados (.csv) e de CBO (.xlsx) para iniciar.")
+except Exception as e:
+    st.error("Erro ao carregar/processar arquivos! Verifique se todos existem na pasta do código.")
+    st.exception(e)
