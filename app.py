@@ -6,8 +6,8 @@ import streamlit as st
 import os
 
 class MercadoTrabalhoPredictor:
-    def __init__(self, csv_files: list, codigos_filepath: str):
-        self.csv_files = csv_files
+    def __init__(self, parquet_path: str, codigos_filepath: str):
+        self.parquet_path = parquet_path
         self.codigos_filepath = codigos_filepath
         self.df = None
         self.df_codigos = None
@@ -20,13 +20,12 @@ class MercadoTrabalhoPredictor:
             return str(valor)
 
     def carregar_dados(self):
-        missing = [f for f in self.csv_files + [self.codigos_filepath] if not os.path.exists(f)]
+        missing = [f for f in [self.parquet_path, self.codigos_filepath] if not os.path.exists(f)]
         if missing:
             st.error(f"Arquivos ausentes: {', '.join(missing)}")
             return False
-        st.info("Arquivos carregados: " + ", ".join(os.path.basename(f) for f in self.csv_files + [self.codigos_filepath]))
-        dfs = [pd.read_csv(path, encoding='utf-8', sep=';', on_bad_lines='skip') for path in self.csv_files]
-        self.df = pd.concat(dfs, ignore_index=True)
+        st.info("Arquivos carregados: " + ", ".join(os.path.basename(f) for f in [self.parquet_path, self.codigos_filepath]))
+        self.df = pd.read_parquet(self.parquet_path)
         self.df_codigos = pd.read_excel(self.codigos_filepath)
         self.df_codigos.columns = ['cbo_codigo', 'cbo_descricao']
         self.df_codigos['cbo_codigo'] = self.df_codigos['cbo_codigo'].astype(str)
@@ -42,7 +41,6 @@ class MercadoTrabalhoPredictor:
         return self.df_codigos[mask]
 
     def interpretacao_score(self, score):
-        # Interpretação de confiabilidade para display amigável
         if score > 0.9: return "🟢 Excelente (alta confiabilidade)"
         if score > 0.7: return "🟡 Bom (confiável)"
         if score > 0.5: return "🟠 Moderado"
@@ -50,10 +48,10 @@ class MercadoTrabalhoPredictor:
 
     def relatorio_previsao(self, cbo_codigo, anos_futuros=[5,10,15,20]):
         df = self.df
-        col_cbo = "cbo2002ocupação"
-        col_data = "competênciamov"
-        col_salario = "salário"
-        saldo_col = "saldomovimentação"
+        col_cbo = "cbo2002ocupacao" if "cbo2002ocupacao" in df.columns else "cbo2002ocupação"
+        col_data = "competenciamov" if "competenciamov" in df.columns else "competênciamov"
+        col_salario = "salario" if "salario" in df.columns else "salário"
+        saldo_col = "saldomovimentacao" if "saldomovimentacao" in df.columns else "saldomovimentação"
 
         prof_info = self.df_codigos[self.df_codigos['cbo_codigo'] == cbo_codigo]
         st.markdown(f"### Profissão: <span style='color:#365ebf; font-weight:bold'>{prof_info.iloc[0]['cbo_descricao'] if not prof_info.empty else cbo_codigo}</span>", unsafe_allow_html=True)
@@ -99,7 +97,9 @@ class MercadoTrabalhoPredictor:
         if saldo_col in df_cbo.columns:
             df_cbo[saldo_col] = pd.to_numeric(df_cbo[saldo_col], errors='coerce')
             df_cbo[col_data] = pd.to_datetime(df_cbo[col_data], errors='coerce')
+            df_cbo = df_cbo.dropna(subset=[col_data])
             df_cbo['ano'] = df_cbo[col_data].dt.year
+            df_cbo = df_cbo[df_cbo['ano'] >= 2020]  # só dados válidos
             saldo_ano = df_cbo.groupby("ano")[saldo_col].sum().reset_index()
             st.write("**Histórico:**")
             linhas_historico = []
@@ -110,7 +110,6 @@ class MercadoTrabalhoPredictor:
                 else: status = "Estável"
                 linhas_historico.append(f"- Ano {int(linha['ano'])}: {v:+,} ({status})")
             st.write("\n".join(linhas_historico))
-            # Modelo para previsão e score
             X_hist = saldo_ano[['ano']]
             y_hist = saldo_ano[saldo_col]
             if len(X_hist) > 1:
@@ -148,6 +147,8 @@ class MercadoTrabalhoPredictor:
         df_cbo = df_cbo.dropna(subset=[col_salario])
         df_cbo[col_data] = pd.to_datetime(df_cbo[col_data], errors='coerce')
         df_cbo = df_cbo.dropna(subset=[col_data])
+        df_cbo['ano'] = df_cbo[col_data].dt.year
+        df_cbo = df_cbo[df_cbo['ano'] >= 2020]
         if df_cbo.empty:
             st.warning("Não há dados salariais temporais válidos.")
             return
@@ -185,18 +186,11 @@ class MercadoTrabalhoPredictor:
 st.set_page_config(page_title="Previsão Mercado de Trabalho", layout="wide")
 st.title("📊 Previsão do Mercado de Trabalho (CAGED/CBO)")
 
-csv_files = [
-    "2020_PE1.csv",
-    "2021_PE1.csv",
-    "2022_PE1.csv",
-    "2023_PE1.csv",
-    "2024_PE1.csv",
-    "2025_PE1.csv"
-]
+parquet_path = "dados.parquet"
 codigos_filepath = "cbo.xlsx"
 
 with st.spinner("Verificando e carregando arquivos..."):
-    app = MercadoTrabalhoPredictor(csv_files, codigos_filepath)
+    app = MercadoTrabalhoPredictor(parquet_path, codigos_filepath)
     arquivos_ok = app.carregar_dados()
 
 if not arquivos_ok:
