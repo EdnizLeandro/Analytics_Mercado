@@ -18,9 +18,11 @@ class MercadoTrabalhoPredictor:
 
     def carregar_dados(self):
         print("Etapa 1: Carregando datasets .csv...")
-        dfs = [pd.read_csv(path, encoding='utf-8', on_bad_lines='skip') for path in self.csv_files]
+        # Separador padrão dos arquivos do CAGED é ponto-e-vírgula
+        dfs = [pd.read_csv(path, encoding='utf-8', sep=';', on_bad_lines='skip') for path in self.csv_files]
         self.df = pd.concat(dfs, ignore_index=True)
         print(f"Dataset carregado com {self.df.shape[0]} linhas e {self.df.shape[1]} colunas.")
+        print("Colunas presentes:", self.df.columns.tolist())
 
         print("Carregando lista de códigos CBO...")
         self.df_codigos = pd.read_excel(self.codigos_filepath)
@@ -43,14 +45,23 @@ class MercadoTrabalhoPredictor:
         self._identificar_colunas()
 
     def _identificar_colunas(self):
-        for col in self.df.columns:
-            col_lower = col.lower().replace(' ', '').replace('_', '')
-            if 'cbo' in col_lower and 'ocupa' in col_lower:
-                self.coluna_cbo = col
-            if 'competencia' in col_lower and 'mov' in col_lower:
-                self.coluna_data = col
-            if 'salario' in col_lower and 'fixo' in col_lower:
-                self.coluna_salario = col
+        nomes = [c.lower().replace(" ", "").replace("_", "").replace("ã","a").replace("ê","e") for c in self.df.columns]
+        # CBO
+        possiveis_cbo = [c for c in self.df.columns if "cbo" in c.lower() and "ocup" in c.lower()]
+        if not possiveis_cbo:
+            possiveis_cbo = [c for c in self.df.columns if "cbo" in c.lower()]
+        self.coluna_cbo = possiveis_cbo[0] if possiveis_cbo else None
+        # DATA — compatível com "competênciamov", "competencia", "data", "mes"
+        possiveis_data = [c for c in self.df.columns if "compet" in c.lower() and "mov" in c.lower()]
+        if not possiveis_data:
+            possiveis_data = [c for c in self.df.columns if "compet" in c.lower() or "mes" in c.lower() or "data" in c.lower()]
+        self.coluna_data = possiveis_data[0] if possiveis_data else None
+        # SALÁRIO — adapta para nomes variados
+        possiveis_salario = [c for c in self.df.columns if "salario" in c.lower() and ("fixo" in c.lower() or "valor" in c.lower())]
+        if not possiveis_salario:
+            possiveis_salario = [c for c in self.df.columns if "salario" in c.lower()]
+        self.coluna_salario = possiveis_salario[0] if possiveis_salario else None
+
         print(f"  ✓ Coluna CBO: {self.coluna_cbo}")
         print(f"  ✓ Coluna DATA: {self.coluna_data}")
         print(f"  ✓ Coluna SALÁRIO: {self.coluna_salario}\n")
@@ -59,7 +70,6 @@ class MercadoTrabalhoPredictor:
         if not self.cleaned:
             print("Limpe o dataset antes de buscar profissões.")
             return pd.DataFrame()
-
         print(f"Etapa 3: Buscando '{entrada}'...")
 
         if entrada.isdigit():
@@ -70,7 +80,6 @@ class MercadoTrabalhoPredictor:
             else:
                 print("Código CBO não encontrado.\n")
                 return pd.DataFrame()
-        
         mask = self.df_codigos['cbo_descricao'].str.contains(entrada, case=False, na=False)
         resultados = self.df_codigos[mask]
         if resultados.empty:
@@ -86,24 +95,20 @@ class MercadoTrabalhoPredictor:
         if not self.cleaned:
             print("Dataset não limpo.")
             return
-
         if not all([self.coluna_cbo, self.coluna_data, self.coluna_salario]):
             print("Colunas não identificadas.")
+            print("Colunas disponíveis:", self.df.columns.tolist())
             return
 
         print(f"Etapa 4: Prevendo mercado para CBO {cbo_codigo}...")
-
         prof_info = self.df_codigos[self.df_codigos['cbo_codigo'] == cbo_codigo]
         if not prof_info.empty:
             print(f"Profissão: {prof_info.iloc[0]['cbo_descricao']}\n")
-
         print(f"Filtrando dados para CBO {cbo_codigo}...")
         df_cbo = self.df[self.df[self.coluna_cbo].astype(str) == cbo_codigo].copy()
-
         if df_cbo.empty:
             print("Nenhum registro encontrado.\n")
             return
-
         print(f"{len(df_cbo):,} registros encontrados.\n")
 
         print("="*70)
