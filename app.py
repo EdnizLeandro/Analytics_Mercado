@@ -148,12 +148,17 @@ df_hist, COL_CBO, COL_SALARIO = carregar_historico()
 entrada = st.text_input("Digite nome ou código da profissão:")
 
 lista_profissoes = []
+
 if entrada.strip():
     resultados = buscar_profissoes(df_cbo, entrada)
+    
     if not resultados.empty:
         lista_profissoes = (
             resultados["Descrição"] + " (" + resultados["Código"] + ")"
         ).tolist()
+        st.success(f"{len(resultados)} profissão(ões) encontrada(s).")
+    else:
+        st.warning("Nenhuma profissão encontrada. Verifique a digitação ou tente outro termo.")
 
 escolha = st.selectbox("Selecione a profissão:", [""] + lista_profissoes)
 
