@@ -5,9 +5,6 @@ from sklearn.metrics import r2_score, mean_absolute_error
 from xgboost import XGBRegressor
 import streamlit as st
 
-# ------------------------------
-# CLASSE DE PREDIÇÃO DE MERCADO
-# ------------------------------
 class MercadoTrabalhoPredictor:
     def __init__(self, parquet_file: str, codigos_filepath: str):
         self.parquet_file = parquet_file
@@ -29,7 +26,10 @@ class MercadoTrabalhoPredictor:
         self.df_codigos["cbo_codigo"] = self.df_codigos["cbo_codigo"].astype(str)
 
         if "salario" in self.df.columns:
-            self.df["salario"] = pd.to_numeric(self.df["salario"].astype(str).str.replace(",", "."), errors="coerce")
+            self.df["salario"] = pd.to_numeric(
+                self.df["salario"].astype(str).str.replace(",", "."),
+                errors="coerce"
+            )
             mediana = self.df["salario"].median()
             self.df["salario"] = self.df["salario"].fillna(mediana)
 
@@ -38,13 +38,15 @@ class MercadoTrabalhoPredictor:
     def buscar_profissao(self, entrada: str):
         if not self.cleaned:
             return pd.DataFrame()
+
         entrada = entrada.strip()
         if entrada.isdigit():
             return self.df_codigos[self.df_codigos["cbo_codigo"] == entrada]
+
         mask = self.df_codigos["cbo_descricao"].str.contains(entrada, case=False, na=False)
         return self.df_codigos[mask]
 
-    def relatorio_previsao(self, cbo_codigo, anos_futuros=[5,10,15,20]):
+    def relatorio_previsao(self, cbo_codigo, anos_futuros=[5, 10, 15, 20]):
         df = self.df
         col_cbo = "cbo2002ocupacao"
         col_data = "competenciamov"
@@ -54,106 +56,114 @@ class MercadoTrabalhoPredictor:
         prof_info = self.df_codigos[self.df_codigos["cbo_codigo"] == cbo_codigo]
         titulo = prof_info.iloc[0]["cbo_descricao"] if not prof_info.empty else f"CBO {cbo_codigo}"
 
-        # Filtra dados da profissão
+        # Placeholder para saída em estilo console
+        console_output = []
+        console_output.append(f"Profissão: {titulo}\n")
+
         df_cbo = df[df[col_cbo].astype(str) == cbo_codigo].copy()
         if df_cbo.empty:
-            st.warning("Nenhum dado disponível para esta profissão.")
-            return
+            console_output.append("Nenhum dado disponível para esta profissão.")
+            return "\n".join(console_output)
 
-        # Converte datas
+        # Salário
         df_cbo[col_data] = pd.to_datetime(df_cbo[col_data], errors="coerce")
         df_cbo = df_cbo.dropna(subset=[col_data])
         df_cbo["tempo_meses"] = (df_cbo[col_data].dt.year - 2020) * 12 + df_cbo[col_data].dt.month
-
         salario_atual = df_cbo[col_salario].mean()
+        console_output.append(f"Salário médio atual: R$ {self.formatar_moeda(salario_atual)}\n")
 
-        # Agrupa mensal
+        # Preparar dados para modelos
         df_mensal = df_cbo.groupby("tempo_meses")[col_salario].mean().reset_index()
         if len(df_mensal) < 2:
-            st.info("Sem dados suficientes para fazer previsões.")
-            return
+            console_output.append("Sem dados suficientes para fazer previsões salariais.")
+            return "\n".join(console_output)
 
         X = df_mensal[["tempo_meses"]]
         y = df_mensal[col_salario]
 
-        # Treina modelos
-        modelos = {
-            "LinearRegression": LinearRegression(),
-            "XGBoost": XGBRegressor(n_estimators=100, objective="reg:squarederror")
-        }
+        # Treinar LinearRegression
+        lr = LinearRegression()
+        lr.fit(X, y)
+        y_pred_lr = lr.predict(X)
+        r2_lr = r2_score(y, y_pred_lr)
+        mae_lr = mean_absolute_error(y, y_pred_lr)
 
-        resultados = {}
-        for nome, model in modelos.items():
-            model.fit(X, y)
-            pred = model.predict(X)
-            r2 = r2_score(y, pred)
-            mae = mean_absolute_error(y, pred)
-            resultados[nome] = {"model": model, "r2": r2, "mae": mae}
+        # Treinar XGBoost
+        xgb = XGBRegressor(objective='reg:squarederror', n_estimators=100)
+        xgb.fit(X, y)
+        y_pred_xgb = xgb.predict(X)
+        r2_xgb = r2_score(y, y_pred_xgb)
+        mae_xgb = mean_absolute_error(y, y_pred_xgb)
 
-        melhor_nome = max(resultados, key=lambda k: resultados[k]["r2"])
-        melhor_modelo = resultados[melhor_nome]["model"]
+        # Escolher melhor modelo pelo R²
+        if r2_xgb >= r2_lr:
+            modelo_vencedor = xgb
+            modelo_nome = "XGBoost"
+            r2 = r2_xgb
+            mae = mae_xgb
+        else:
+            modelo_vencedor = lr
+            modelo_nome = "Linear Regression"
+            r2 = r2_lr
+            mae = mae_lr
 
-        # ---------- PREVISÃO SALARIAL FUTURA ----------
+        console_output.append(f"Modelo vencedor: {modelo_nome} (R²={r2*100:.2f}%, MAE={mae:.2f})\n")
+        console_output.append("Previsão salarial futura do melhor modelo:")
+
         ult_mes = df_mensal["tempo_meses"].max()
-        previsoes = []
         for anos in anos_futuros:
             futuro = ult_mes + anos*12
-            pred = melhor_modelo.predict([[futuro]])[0]
-            previsoes.append([anos, pred])
+            pred = modelo_vencedor.predict([[futuro]])[0]
+            console_output.append(f"  {anos} anos → R$ {self.formatar_moeda(pred)}")
 
-        # Tendência de salário
-        if previsoes[-1][1] > salario_atual:
-            tendencia_salario = "TENDÊNCIA DE CRESCIMENTO"
-        elif previsoes[-1][1] < salario_atual:
-            tendencia_salario = "TENDÊNCIA DE QUEDA"
-        else:
-            tendencia_salario = "TENDÊNCIA ESTÁVEL"
+        console_output.append("* Tendência de crescimento do salário no longo prazo.\n")
+        console_output.append("="*70)
+        console_output.append("TENDÊNCIA DE MERCADO (Projeção de demanda para a profissão):")
+        console_output.append("="*70)
 
-        # ---------- SALDO DE VAGAS ----------
         if col_saldo not in df_cbo.columns:
-            df_cbo[col_saldo] = 0  # Caso não exista
+            console_output.append("Sem dados de movimentação.")
+            return "\n".join(console_output)
 
         df_saldo = df_cbo.groupby("tempo_meses")[col_saldo].sum().reset_index()
-        mod_saldo = LinearRegression().fit(df_saldo[["tempo_meses"]], df_saldo[col_saldo])
+        if len(df_saldo) < 2:
+            console_output.append("Dados insuficientes para prever vagas.")
+            return "\n".join(console_output)
+
+        Xs = df_saldo[["tempo_meses"]]
+        ys = df_saldo[col_saldo]
+        mod_saldo = LinearRegression().fit(Xs, ys)
         ult_mes_s = df_saldo["tempo_meses"].max()
 
-        # Situação histórica recente
-        saldo_recente = df_saldo[col_saldo].iloc[-1]
-        if saldo_recente > 100: situacao_hist = "ALTA DEMANDA"
-        elif saldo_recente > 50: situacao_hist = "CRESCIMENTO MODERADO"
-        elif saldo_recente > 0: situacao_hist = "CRESCIMENTO LEVE"
-        elif saldo_recente > -50: situacao_hist = "RETRAÇÃO LEVE"
-        else: situacao_hist = "RETRAÇÃO"
+        # Situação histórica
+        ultima_situacao = ys.iloc[-1]
+        if ultima_situacao > 100:
+            situacao = "ALTA DEMANDA"
+        elif ultima_situacao > 50:
+            situacao = "CRESCIMENTO MODERADO"
+        elif ultima_situacao > 0:
+            situacao = "CRESCIMENTO LEVE"
+        elif ultima_situacao > -50:
+            situacao = "RETRAÇÃO LEVE"
+        else:
+            situacao = "RETRAÇÃO"
 
-        # Projeção de saldo de vagas
-        proj_saldo = []
+        console_output.append(f"Situação histórica recente: {situacao}\n")
+        console_output.append("Projeção de saldo de vagas (admissões - desligamentos):")
         for anos in anos_futuros:
             futuro = ult_mes_s + anos*12
             pred = mod_saldo.predict([[futuro]])[0]
-            proj_saldo.append([anos, round(pred), "→"])
+            if pred > 0:
+                seta = "↑"
+            elif pred < 0:
+                seta = "↓"
+            else:
+                seta = "→"
+            console_output.append(f"  {anos} anos: {int(pred)} ({seta})")
 
-        # ---------- IMPRESSÃO FORMATADA ----------
-        console_output = []
+        return "\n".join(console_output)
 
-        console_output.append(f"Previsão salarial futura do melhor modelo:")
-        for anos, valor in previsoes:
-            console_output.append(f"  {anos} anos → R$ {self.formatar_moeda(valor)}")
-        console_output.append(f"* Tendência de crescimento do salário no longo prazo: {tendencia_salario}")
-        console_output.append("\n" + "="*70)
-        console_output.append("TENDÊNCIA DE MERCADO (Projeção de demanda para a profissão):")
-        console_output.append("="*70)
-        console_output.append(f"Situação histórica recente: {situacao_hist}")
-        console_output.append("\nProjeção de saldo de vagas (admissões - desligamentos):")
-        for anos, valor, seta in proj_saldo:
-            console_output.append(f"  {anos} anos: {valor} ({seta})")
-        console_output.append("Digite o nome ou código da profissão (ou 'sair' para encerrar):")
-
-        st.text("\n".join(console_output))
-
-
-# ------------------------------
-# APLICATIVO STREAMLIT
-# ------------------------------
+# -------------------- Streamlit --------------------
 st.set_page_config(page_title="Previsão Mercado de Trabalho", layout="wide")
 st.title("📊 Previsão do Mercado de Trabalho (CAGED / CBO)")
 
@@ -165,16 +175,17 @@ with st.spinner("Carregando dados..."):
     app.carregar_dados()
 
 busca = st.text_input("Digite nome ou código da profissão:")
+saida_placeholder = st.empty()  # placeholder para saída
 
 if busca:
     resultados = app.buscar_profissao(busca)
-
     if resultados.empty:
-        st.warning("Nenhuma profissão encontrada.")
+        saida_placeholder.text("Nenhuma profissão encontrada.")
     else:
         lista = resultados["cbo_codigo"] + " - " + resultados["cbo_descricao"]
         escolha = st.selectbox("Selecione o CBO:", lista)
         cbo_codigo = escolha.split(" - ")[0]
 
         if st.button("Gerar Relatório Completo"):
-            app.relatorio_previsao(cbo_codigo)
+            saida = app.relatorio_previsao(cbo_codigo)
+            saida_placeholder.text(saida)
