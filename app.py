@@ -102,7 +102,7 @@ def tendencia(df, col_cbo, cbo_cod):
 
 st.set_page_config(page_title="Mercado de Trabalho", layout="wide")
 
-st.title("📊 Previsão do Mercado de Trabalho (CAGED / CBO)")
+st.title("Previsão do Mercado de Trabalho (Novo CAGED)")
 
 df_cbo = carregar_dados_cbo()
 df_hist, COL_CBO, COL_SALARIO = carregar_historico()
@@ -131,21 +131,21 @@ if escolha != "":
     cbo_codigo = escolha.split("(")[-1].replace(")", "").strip()
     descricao = escolha.split("(")[0].strip()
 
-    st.header(f"👷 Profissão: {descricao}")
+    st.header(f"Profissão: {descricao}")
 
     dados_prof = df_hist[df_hist[COL_CBO] == cbo_codigo]
 
     if not dados_prof.empty:
         salario_atual = dados_prof[COL_SALARIO].mean()
-        st.subheader("💰 Salário Médio Atual")
+        st.subheader("Salário Médio Atual")
         st.write(f"R$ {salario_atual:,.2f}")
 
-        st.subheader("📈 Previsão Salarial")
+        st.subheader("Previsão Salarial")
         prev = prever_salario(salario_atual)
         for ano, val in prev.items():
             st.write(f"{ano} anos → **R$ {val:,.2f}**")
 
-        st.subheader("📊 Tendência de Mercado")
+        st.subheader("Tendência de Mercado")
         status, vagas = tendencia(df_hist, COL_CBO, cbo_codigo)
         st.write(f"Situação histórica: **{status}**")
 
