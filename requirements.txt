@@ -9,3 +9,4 @@ pyarrow
 statsmodels
 prophet  
 tensorflow
+unidecode
