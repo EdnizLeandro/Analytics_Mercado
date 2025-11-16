@@ -1,107 +1,115 @@
 import streamlit as st
 import pandas as pd
+from unidecode import unidecode
 import numpy as np
-from sklearn.linear_model import LinearRegression
-from sklearn.ensemble import RandomForestRegressor
-from xgboost import XGBRegressor
-from sklearn.metrics import r2_score, mean_absolute_error
 
-# Função para formatar moeda
-def formatar_moeda(valor):
-    return f"{valor:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+# -------------------------------
+# Funções de carregamento e busca
+# -------------------------------
+@st.cache_data
+def carregar_dados_cbo(cbo_path="cbo.xlsx"):
+    df = pd.read_excel(cbo_path)
+    df["Código"] = df["Código"].astype(str).str.strip()
+    df["Descrição"] = df["Descrição"].str.strip()
+    return df
 
-# Simulação de base de dados histórica de salários (exemplo)
-data = {
-    'Ano': np.arange(2000, 2024),
-    'Salario': np.random.uniform(1200, 2500, 24)  # Salários fictícios
-}
-df = pd.DataFrame(data)
+@st.cache_data
+def carregar_dados_historico(dados_path="dados.parquet"):
+    df = pd.read_parquet(dados_path)
+    df["cbo2002ocupação"] = df["cbo2002ocupação"].astype(str).str.strip()
+    df["salário"] = df["salário"].fillna(0)
+    return df
 
-# Função para treinar modelos e escolher o melhor
-def treinar_modelos(X, y):
-    modelos = {
-        "Linear Regression": LinearRegression(),
-        "Random Forest": RandomForestRegressor(n_estimators=100, random_state=42),
-        "XGBoost": XGBRegressor(n_estimators=100, random_state=42, objective='reg:squarederror')
-    }
-    resultados = {}
-    for nome, modelo in modelos.items():
-        modelo.fit(X, y)
-        y_pred = modelo.predict(X)
-        r2 = r2_score(y, y_pred)
-        mae = mean_absolute_error(y, y_pred)
-        resultados[nome] = {"modelo": modelo, "r2": r2, "mae": mae}
-    melhor = max(resultados.items(), key=lambda x: x[1]['r2'])
-    return melhor, resultados
+def buscar_profissao(df, entrada):
+    entrada_limpa = unidecode(entrada.lower().strip())
+    if entrada.isdigit():
+        resultado = df[df["Código"] == entrada]
+    else:
+        resultado = df[df["Descrição"].apply(lambda x: entrada_limpa in unidecode(str(x).lower()))]
+    return resultado
 
-# Função para fazer previsões futuras
-def previsoes_futuras(modelo, anos_futuros):
-    ultimo_ano = df['Ano'].max()
-    anos = np.array([ultimo_ano + i for i in anos_futuros]).reshape(-1, 1)
-    previsoes = modelo.predict(anos)
-    return pd.DataFrame({
-        'Ano': anos.flatten(),
-        'Salário Previsto (R$)': [formatar_moeda(v) for v in previsoes]
-    })
+# -------------------------------
+# Função de previsão salarial simples
+# -------------------------------
+def prever_salario(salario_atual):
+    anos = [5, 10, 15, 20]
+    crescimento_anual = 0.02  # 2% ao ano
+    previsao = [round(salario_atual * ((1 + crescimento_anual) ** ano), 2) for ano in anos]
+    return dict(zip(anos, previsao))
 
-# Simulação de base CBO
-cbo_dict = {
-    "Pintor de Obras": "514105",
-    "Pintor de Automóveis": "514110",
-    "Pintor Artístico": "514115"
-}
+# -------------------------------
+# Função de tendência de mercado
+# -------------------------------
+def tendencia_mercado(df_historico, cbo_codigo):
+    df = df_historico[df_historico["cbo2002ocupação"] == cbo_codigo].copy()
+    if df.empty:
+        return "Sem dados suficientes", {5:0,10:0,15:0,20:0}
+    # saldo = admissoes - desligamentos, usando coluna 'saldomovimentação'
+    df["saldo"] = df["saldomovimentação"]
+    anos_projecao = [5, 10, 15, 20]
+    saldo_projecao = {ano: int(df["saldo"].mean()) for ano in anos_projecao}
+    
+    saldo_medio = df["saldo"].mean()
+    if saldo_medio > 10:
+        situacao = "CRESCIMENTO ACELERADO"
+    elif saldo_medio > 0:
+        situacao = "CRESCIMENTO LEVE"
+    elif saldo_medio < -10:
+        situacao = "QUEDA ACELERADA"
+    elif saldo_medio < 0:
+        situacao = "QUEDA LEVE"
+    else:
+        situacao = "ESTÁVEL"
+    
+    return situacao, saldo_projecao
 
-# Streamlit app
-st.title("Previsão Salarial e Tendência de Mercado")
+# -------------------------------
+# Streamlit Interface
+# -------------------------------
+st.set_page_config(page_title="Previsão Salarial e Mercado de Trabalho", layout="wide")
+st.title("📊 Previsão Mercado de Trabalho (Novo Caged)")
 
-placeholder = st.empty()
-with placeholder.container():
-    profissao_input = st.text_input("Digite o nome ou código da profissão:")
+# Carregar dados
+df_cbo = carregar_dados_cbo()
+df_historico = carregar_dados_historico()
 
-    if profissao_input:
-        # Verifica se é genérico e pede seleção do CBO
-        opcoes = [nome for nome in cbo_dict.keys() if profissao_input.lower() in nome.lower()]
-        
-        if len(opcoes) > 1:
-            cbo_selecionado = st.selectbox("Selecione o CBO correto:", opcoes)
-        elif len(opcoes) == 1:
-            cbo_selecionado = opcoes[0]
-        else:
-            st.warning("Profissão não encontrada. Digite outro nome ou código.")
-            st.stop()
+entrada = st.text_input("Digite nome ou código da profissão:")
 
-        # Dados da profissão selecionada
-        profissao = cbo_selecionado
-        salario_atual = df['Salario'].iloc[-1]
-
-        st.markdown(f"### Profissão: **{profissao}**")
-        st.markdown(f"Salário médio atual: **R$ {formatar_moeda(salario_atual)}**")
-
-        # Treinar modelos
-        X = df['Ano'].values.reshape(-1, 1)
-        y = df['Salario'].values
-        melhor_modelo_nome, resultados_modelos = treinar_modelos(X, y)
-        modelo = resultados_modelos[melhor_modelo_nome[0]]['modelo']
-        r2 = resultados_modelos[melhor_modelo_nome[0]]['r2']*100
-        mae = resultados_modelos[melhor_modelo_nome[0]]['mae']
-
-        st.markdown(f"*Melhor modelo:* **{melhor_modelo_nome[0]}** (R²={r2:.2f}%, MAE={mae:.2f})")
-
-        # Previsões futuras
-        anos_futuros = [5, 10, 15, 20]
-        df_prev = previsoes_futuras(modelo, anos_futuros)
-        st.markdown("### Previsão salarial futura do melhor modelo:")
-        st.table(df_prev)
-
-        # Tendência de mercado (simulação)
-        st.markdown("======================================================================")
-        st.markdown("TENDÊNCIA DE MERCADO (Projeção de demanda para a profissão):")
-        st.markdown("======================================================================")
-
-        tendencia = pd.DataFrame({
-            "Ano": anos_futuros,
-            "Saldo de Vagas": [0, 0, 0, 0],  # Simulação
-            "Tendência": ["→", "→", "→", "→"]
-        })
-        st.markdown("Situação histórica recente: **CRESCIMENTO LEVE**")
-        st.table(tendencia)
+if entrada:
+    resultado = buscar_profissao(df_cbo, entrada)
+    
+    if resultado.empty:
+        st.error("Profissão não encontrada. Digite outro nome ou código.")
+    elif len(resultado) > 1:
+        st.warning("Encontramos múltiplas opções. Por favor, selecione uma:")
+        opcao = st.selectbox("Selecione a profissão:", resultado["Descrição"] + " (" + resultado["Código"] + ")")
+        cbo_codigo = resultado[resultado["Descrição"] + " (" + resultado["Código"] + ")" == opcao]["Código"].values[0]
+    else:
+        cbo_codigo = resultado["Código"].values[0]
+    
+    # Buscar salário médio no histórico
+    df_salario = df_historico[df_historico["cbo2002ocupação"] == cbo_codigo]
+    if not df_salario.empty:
+        salario_atual = df_salario["salário"].mean()
+    else:
+        salario_atual = 0
+    
+    st.subheader(f"Profissão: {resultado.loc[resultado['Código']==cbo_codigo, 'Descrição'].values[0]}")
+    st.write(f"Salário médio atual: R$ {salario_atual:,.2f}")
+    
+    if salario_atual > 0:
+        previsao = prever_salario(salario_atual)
+        st.markdown("**Previsão salarial futura do melhor modelo:**")
+        for ano, valor in previsao.items():
+            st.write(f"{ano} anos → R$ {valor:,.2f}")
+        st.write("* Tendência de crescimento do salário no longo prazo.")
+    
+    situacao, saldo_projecao = tendencia_mercado(df_historico, cbo_codigo)
+    st.markdown("======================================================================")
+    st.markdown("**TENDÊNCIA DE MERCADO (Projeção de demanda para a profissão):**")
+    st.markdown("======================================================================")
+    st.write(f"Situação histórica recente: {situacao}")
+    st.write("Projeção de saldo de vagas (admissões - desligamentos):")
+    for ano, saldo in saldo_projecao.items():
+        seta = "→" if saldo==0 else ("↑" if saldo>0 else "↓")
+        st.write(f"  {ano} anos: {saldo} ({seta})")
