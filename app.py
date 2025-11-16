@@ -115,7 +115,12 @@ if entrada.strip():
     else:
         st.warning("Nenhuma profissão encontrada. Verifique a digitação ou tente outro termo.")
 
-escolha = st.selectbox("Selecione a profissão:", [""] + lista_profissoes)
+# Define índice inicial do selectbox
+# Se houver profissões, seleciona a primeira; caso contrário, vazio
+if lista_profissoes:
+    escolha = st.selectbox("Selecione a profissão:", [""] + lista_profissoes, index=1)
+else:
+    escolha = st.selectbox("Selecione a profissão:", [""])
 
 # -----------------------------
 # Mostrar resultados
