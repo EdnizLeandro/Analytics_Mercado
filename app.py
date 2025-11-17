@@ -1,87 +1,232 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_squared_error
-import xgboost as xgb
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.linear_model import LinearRegression
+import unicodedata
 import matplotlib.pyplot as plt
 
-st.title("Previsão de Salários por Profissão")
+from prophet import Prophet
+from xgboost import XGBRegressor
+from sklearn.metrics import mean_squared_error
 
-# --- CARREGAR DADOS ---
-uploaded_file = st.file_uploader("Escolha um arquivo CSV", type="csv")
-if uploaded_file:
-    df = pd.read_csv(uploaded_file)
-    
-    # Converter 'competênciamov' para datetime
-    df["competênciamov"] = df["competênciamov"].astype(str)
-    df["data"] = pd.to_datetime(df["competênciamov"], format="%Y%m")
+# ----------------------------------------------------------
+# FUNÇÃO PARA NORMALIZAR TEXTO
+# ----------------------------------------------------------
+def normalizar(texto):
+    if not isinstance(texto, str):
+        return ""
+    texto = texto.lower().strip()
+    return "".join(
+        c for c in unicodedata.normalize("NFD", texto)
+        if unicodedata.category(c) != "Mn"
+    )
 
-    st.write("Primeiras linhas do dataset:")
-    st.dataframe(df.head())
+# ----------------------------------------------------------
+# CARREGAR CBO
+# ----------------------------------------------------------
+@st.cache_data
+def carregar_dados_cbo():
+    df = pd.read_excel("cbo.xlsx")
+    df.columns = ["Código", "Descrição"]
+    df["Código"] = df["Código"].astype(str).str.strip()
+    df["Descrição"] = df["Descrição"].astype(str).str.strip()
+    df["Descrição_norm"] = df["Descrição"].apply(normalizar)
+    return df
 
-    # --- SELEÇÃO DE PROFISSÃO ---
-    profissao = st.selectbox("Selecione a profissão:", df["profissao"].unique())
-    df_prof = df[df["profissao"] == profissao].copy()
-    
-    st.write(f"Dados filtrados para a profissão: **{profissao}**")
+# ----------------------------------------------------------
+# CARREGAR HISTÓRICO
+# ----------------------------------------------------------
+@st.cache_data
+def carregar_historico():
+    df = pd.read_parquet("dados.parquet")
 
-    # --- PREPARAR DADOS ---
-    # Transformar datetime em número para os modelos
-    df_prof["data_num"] = df_prof["data"].map(pd.Timestamp.toordinal)
-    X = df_prof[["data_num"]]
-    y = df_prof["salario"]
+    # Normalizar nomes das colunas
+    cols_norm = {}
+    for col in df.columns:
+        col_norm = "".join(
+            c for c in unicodedata.normalize("NFD", col.lower())
+            if unicodedata.category(c) != "Mn"
+        )
+        cols_norm[col] = col_norm
 
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, shuffle=False)
+    df.columns = cols_norm.values()
 
-    # --- TREINAR VÁRIOS MODELOS ---
-    modelos = {
-        "XGBoost": xgb.XGBRegressor(objective='reg:squarederror', n_estimators=100),
-        "RandomForest": RandomForestRegressor(n_estimators=100, random_state=42),
-        "LinearRegression": LinearRegression()
-    }
+    # Detectar colunas de CBO e salário
+    col_cbo = next((c for c in df.columns if "cbo" in c), None)
+    col_sal = next((c for c in df.columns if "sal" in c), None)
 
-    resultados = {}
-    for nome, model in modelos.items():
-        model.fit(X_train, y_train)
-        y_pred = model.predict(X_test)
-        rmse = np.sqrt(mean_squared_error(y_test, y_pred))
-        resultados[nome] = {"modelo": model, "rmse": rmse}
+    df[col_cbo] = df[col_cbo].astype(str).str.strip()
+    df[col_sal] = pd.to_numeric(df[col_sal], errors="coerce").fillna(0)
 
-    # --- ESCOLHER MELHOR MODELO ---
-    melhor_nome = min(resultados, key=lambda x: resultados[x]["rmse"])
-    melhor_modelo = resultados[melhor_nome]["modelo"]
-    melhor_rmse = resultados[melhor_nome]["rmse"]
+    # Renomear 'competênciamov' para 'competencia' se existir
+    if "competênciamov" in df.columns:
+        df = df.rename(columns={"competênciamov": "competencia"})
 
-    st.write(f"✅ Melhor modelo: **{melhor_nome}** com RMSE = **{melhor_rmse:.2f}**")
+    return df, col_cbo, col_sal
 
-    # --- PREDIÇÃO E TENDÊNCIA ---
-    df_prof["predicao"] = melhor_modelo.predict(X)
+# ----------------------------------------------------------
+# BUSCA PROFISSÕES
+# ----------------------------------------------------------
+def buscar_profissoes(df_cbo, texto):
+    tnorm = normalizar(texto)
+    if texto.isdigit():
+        return df_cbo[df_cbo["Código"] == texto]
+    return df_cbo[df_cbo["Descrição_norm"].str.contains(tnorm, na=False)]
 
-    # Previsão futura (ex.: 12 meses)
-    ult_data = df_prof["data"].max()
-    datas_fut = pd.date_range(start=ult_data + pd.DateOffset(months=1), periods=12, freq='M')
-    datas_fut_num = datas_fut.map(pd.Timestamp.toordinal).to_numpy().reshape(-1, 1)
-    pred_fut = melhor_modelo.predict(datas_fut_num)
+# ----------------------------------------------------------
+# CRIAR COLUNA DE DATA
+# ----------------------------------------------------------
+def criar_datas_seguras(df):
+    df_sal = df.copy()
+    df_sal["y"] = df_sal.iloc[:, 0]
 
-    # --- GRÁFICO ---
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(df_prof["data"], df_prof["salario"], label="Salário Real", marker='o')
-    ax.plot(df_prof["data"], df_prof["predicao"], label="Predição Modelo", linestyle="--")
-    ax.plot(datas_fut, pred_fut, label="Projeção Futura", linestyle=":", color="red")
-    ax.set_title(f"Tendência do Salário para {profissao}")
+    # 1) Se existir ano/mes
+    col_ano = next((c for c in df_sal.columns if "ano" in c), None)
+    col_mes = next((c for c in df_sal.columns if "mes" in c), None)
+
+    if col_ano and col_mes:
+        df_sal["data"] = pd.to_datetime(
+            df_sal[col_ano].astype(str) + "-" + df_sal[col_mes].astype(str) + "-01"
+        )
+        return df_sal[["data", "y"]]
+
+    # 2) Se existir 'competencia'
+    if "competencia" in df_sal.columns:
+        df_sal["data"] = pd.to_datetime(df_sal["competencia"].astype(str), format="%Y%m")
+        return df_sal[["data", "y"]]
+
+    # 3) Datas artificiais
+    start_year = 2010
+    n = len(df_sal)
+    datas = pd.date_range(start=f"{start_year}-01-01", periods=n, freq="M")
+    df_sal["data"] = datas
+    return df_sal[["data", "y"]]
+
+# ----------------------------------------------------------
+# TREINAMENTO DO MELHOR MODELO
+# ----------------------------------------------------------
+def treinar_e_escolher_melhor_modelo(df):
+    df = df.sort_values("data").dropna()
+    if len(df) < 24:
+        return None
+
+    split = int(len(df) * 0.8)
+    train = df.iloc[:split]
+    valid = df.iloc[split:]
+    results = {}
+
+    # PROPHET
+    try:
+        prophet_df = train.rename(columns={"data": "ds", "y": "y"})
+        model_prophet = Prophet()
+        model_prophet.fit(prophet_df)
+
+        future = valid.rename(columns={"data": "ds"})
+        pred = model_prophet.predict(future)["yhat"].values
+        rmse = np.sqrt(mean_squared_error(valid["y"].values, pred))
+        results["prophet"] = (rmse, model_prophet)
+    except:
+        pass
+
+    # XGBOOST
+    try:
+        df_ml = df.copy()
+        df_ml["mes"] = df_ml["data"].dt.month
+        df_ml["ano"] = df_ml["data"].dt.year
+
+        train_ml = df_ml.iloc[:split]
+        valid_ml = df_ml.iloc[split:]
+
+        xgb = XGBRegressor(n_estimators=300, learning_rate=0.05)
+        xgb.fit(train_ml[["mes", "ano"]], train_ml["y"])
+        pred = xgb.predict(valid_ml[["mes", "ano"]])
+        rmse = np.sqrt(mean_squared_error(valid_ml["y"], pred))
+        results["xgboost"] = (rmse, xgb)
+    except:
+        pass
+
+    if not results:
+        return None
+
+    best_name = min(results, key=lambda m: results[m][0])
+    rmse, model = results[best_name]
+    return {"modelo_nome": best_name, "melhor_modelo": model, "rmse": rmse}
+
+# ----------------------------------------------------------
+# PREVISÃO
+# ----------------------------------------------------------
+def prever(modelo, modelo_nome, df, anos=20):
+    MAX_YEAR = 2100
+    start = df["data"].max()
+    if start.year >= MAX_YEAR:
+        start = pd.Timestamp(f"{MAX_YEAR}-01-01")
+
+    n_periods = anos * 12 + 1
+    datas = pd.date_range(start=start, periods=n_periods, freq="M")
+
+    if modelo_nome == "prophet":
+        future = modelo.make_future_dataframe(periods=anos * 12, freq="M")
+        fc = modelo.predict(future)
+        return fc[["ds", "yhat"]].rename(columns={"ds": "data", "yhat": "y"})
+
+    if modelo_nome == "xgboost":
+        temp = pd.DataFrame({"data": datas[1:]})
+        temp["mes"] = temp["data"].dt.month
+        temp["ano"] = temp["data"].dt.year
+        temp["y"] = modelo.predict(temp[["mes", "ano"]])
+        return temp
+
+# ----------------------------------------------------------
+# INTERFACE STREAMLIT
+# ----------------------------------------------------------
+st.set_page_config(page_title="Mercado de Trabalho - IA", layout="wide")
+st.title("Previsão Inteligente do Mercado de Trabalho (CAGED + IA)")
+
+df_cbo = carregar_dados_cbo()
+df_hist, COL_CBO, COL_SALARIO = carregar_historico()
+
+entrada = st.text_input("Digite nome ou código da profissão:")
+
+if entrada:
+    res = buscar_profissoes(df_cbo, entrada)
+    if res.empty:
+        st.warning("Nenhuma profissão encontrada.")
+        st.stop()
+    lista = (res["Descrição"] + " (" + res["Código"] + ")").tolist()
+else:
+    lista = []
+
+escolha = st.selectbox("Selecione a profissão:", [""] + lista)
+
+if escolha:
+    cbo = escolha.split("(")[-1].replace(")", "").strip()
+    desc = escolha.split("(")[0].strip()
+    st.header(f"Profissão: {desc}")
+
+    dados = df_hist[df_hist[COL_CBO] == cbo]
+    if dados.empty:
+        st.error("Sem dados.")
+        st.stop()
+
+    df_sal = criar_datas_seguras(dados[[COL_SALARIO]])
+
+    with st.spinner("Treinando modelos, isso pode levar alguns segundos..."):
+        modelo = treinar_e_escolher_melhor_modelo(df_sal)
+
+    if modelo is None:
+        st.error("Dados insuficientes para treinar modelos.")
+        st.stop()
+
+    st.success(f"Modelo escolhido: **{modelo['modelo_nome']}** (RMSE: {modelo['rmse']:.2f})")
+
+    previsao = prever(modelo["melhor_modelo"], modelo["modelo_nome"], df_sal)
+
+    st.subheader("Previsão de até 20 anos")
+    # Gráfico Matplotlib
+    fig, ax = plt.subplots(figsize=(12,6))
+    ax.plot(df_sal["data"], df_sal["y"], label="Histórico")
+    ax.plot(previsao["data"], previsao["y"], label="Previsão", linestyle="--")
+    ax.set_title(f"Salário - {desc}")
     ax.set_xlabel("Data")
     ax.set_ylabel("Salário")
     ax.legend()
-    plt.xticks(rotation=45)
     st.pyplot(fig)
-
-    st.write("""
-    **Explicação do gráfico:**  
-    - Linha sólida: valores reais de salário.  
-    - Linha tracejada: valores previstos pelo modelo treinado.  
-    - Linha pontilhada vermelha: projeção futura para os próximos 12 meses.  
-    - RMSE indica o erro médio das previsões; quanto menor, melhor o modelo.
-    """)
