@@ -10,3 +10,4 @@ statsmodels
 prophet  
 tensorflow
 unidecode
+pmdarima
