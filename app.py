@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import unicodedata
-import matplotlib.pyplot as plt
 
 from prophet import Prophet
 from xgboost import XGBRegressor
@@ -27,6 +26,7 @@ def normalizar(texto):
 def carregar_dados_cbo():
     df = pd.read_excel("cbo.xlsx")
     df.columns = ["Código", "Descrição"]
+
     df["Código"] = df["Código"].astype(str).str.strip()
     df["Descrição"] = df["Descrição"].astype(str).str.strip()
     df["Descrição_norm"] = df["Descrição"].apply(normalizar)
@@ -39,7 +39,7 @@ def carregar_dados_cbo():
 def carregar_historico():
     df = pd.read_parquet("dados.parquet")
 
-    # Normalizar nomes das colunas
+    # Normalizar nomes de colunas
     cols_norm = {}
     for col in df.columns:
         col_norm = "".join(
@@ -47,19 +47,13 @@ def carregar_historico():
             if unicodedata.category(c) != "Mn"
         )
         cols_norm[col] = col_norm
-
     df.columns = cols_norm.values()
 
-    # Detectar colunas de CBO e salário
     col_cbo = next((c for c in df.columns if "cbo" in c), None)
     col_sal = next((c for c in df.columns if "sal" in c), None)
 
     df[col_cbo] = df[col_cbo].astype(str).str.strip()
     df[col_sal] = pd.to_numeric(df[col_sal], errors="coerce").fillna(0)
-
-    # Renomear 'competênciamov' para 'competencia' se existir
-    if "competênciamov" in df.columns:
-        df = df.rename(columns={"competênciamov": "competencia"})
 
     return df, col_cbo, col_sal
 
@@ -73,13 +67,13 @@ def buscar_profissoes(df_cbo, texto):
     return df_cbo[df_cbo["Descrição_norm"].str.contains(tnorm, na=False)]
 
 # ----------------------------------------------------------
-# CRIAR COLUNA DE DATA
+# CRIAR COLUNA DE DATA DE FORMA INTELIGENTE
 # ----------------------------------------------------------
 def criar_datas_seguras(df):
     df_sal = df.copy()
     df_sal["y"] = df_sal.iloc[:, 0]
 
-    # 1) Se existir ano/mes
+    # 1) Se existir ano/mes no parquet
     col_ano = next((c for c in df_sal.columns if "ano" in c), None)
     col_mes = next((c for c in df_sal.columns if "mes" in c), None)
 
@@ -89,15 +83,22 @@ def criar_datas_seguras(df):
         )
         return df_sal[["data", "y"]]
 
-    # 2) Se existir 'competencia'
+    # 2) Se existir 'competencia' tipo 202001
     if "competencia" in df_sal.columns:
         df_sal["data"] = pd.to_datetime(df_sal["competencia"].astype(str), format="%Y%m")
         return df_sal[["data", "y"]]
 
-    # 3) Datas artificiais
-    start_year = 2010
-    n = len(df_sal)
-    datas = pd.date_range(start=f"{start_year}-01-01", periods=n, freq="M")
+    # 3) Criar datas artificiais entre 2020-01 e 2025-12
+    start_date = "2020-01-01"
+    end_date = "2025-12-01"
+    datas = pd.date_range(start=start_date, end=end_date, freq="MS")  # MS = início do mês
+
+    # Ajustar tamanho se precisar
+    if len(df_sal) > len(datas):
+        datas = list(datas) + [datas[-1]] * (len(df_sal) - len(datas))
+    else:
+        datas = datas[:len(df_sal)]
+
     df_sal["data"] = datas
     return df_sal[["data", "y"]]
 
@@ -106,12 +107,14 @@ def criar_datas_seguras(df):
 # ----------------------------------------------------------
 def treinar_e_escolher_melhor_modelo(df):
     df = df.sort_values("data").dropna()
+
     if len(df) < 24:
         return None
 
     split = int(len(df) * 0.8)
     train = df.iloc[:split]
     valid = df.iloc[split:]
+
     results = {}
 
     # PROPHET
@@ -122,6 +125,7 @@ def treinar_e_escolher_melhor_modelo(df):
 
         future = valid.rename(columns={"data": "ds"})
         pred = model_prophet.predict(future)["yhat"].values
+
         rmse = np.sqrt(mean_squared_error(valid["y"].values, pred))
         results["prophet"] = (rmse, model_prophet)
     except:
@@ -138,6 +142,7 @@ def treinar_e_escolher_melhor_modelo(df):
 
         xgb = XGBRegressor(n_estimators=300, learning_rate=0.05)
         xgb.fit(train_ml[["mes", "ano"]], train_ml["y"])
+
         pred = xgb.predict(valid_ml[["mes", "ano"]])
         rmse = np.sqrt(mean_squared_error(valid_ml["y"], pred))
         results["xgboost"] = (rmse, xgb)
@@ -149,16 +154,14 @@ def treinar_e_escolher_melhor_modelo(df):
 
     best_name = min(results, key=lambda m: results[m][0])
     rmse, model = results[best_name]
+
     return {"modelo_nome": best_name, "melhor_modelo": model, "rmse": rmse}
 
 # ----------------------------------------------------------
 # PREVISÃO
 # ----------------------------------------------------------
 def prever(modelo, modelo_nome, df, anos=20):
-    MAX_YEAR = 2100
     start = df["data"].max()
-    if start.year >= MAX_YEAR:
-        start = pd.Timestamp(f"{MAX_YEAR}-01-01")
 
     n_periods = anos * 12 + 1
     datas = pd.date_range(start=start, periods=n_periods, freq="M")
@@ -166,7 +169,7 @@ def prever(modelo, modelo_nome, df, anos=20):
     if modelo_nome == "prophet":
         future = modelo.make_future_dataframe(periods=anos * 12, freq="M")
         fc = modelo.predict(future)
-        return fc[["ds", "yhat"]].rename(columns={"ds": "data", "yhat": "y"})
+        return fc[["ds", "yhat"]].rename(columns={"ds": "data", "y"})
 
     if modelo_nome == "xgboost":
         temp = pd.DataFrame({"data": datas[1:]})
@@ -200,20 +203,24 @@ escolha = st.selectbox("Selecione a profissão:", [""] + lista)
 if escolha:
     cbo = escolha.split("(")[-1].replace(")", "").strip()
     desc = escolha.split("(")[0].strip()
+
     st.header(f"Profissão: {desc}")
 
     dados = df_hist[df_hist[COL_CBO] == cbo]
+
     if dados.empty:
         st.error("Sem dados.")
         st.stop()
 
-    df_sal = criar_datas_seguras(dados[[COL_SALARIO]])
+    # CRIAR SÉRIE COM DATAS SEGURAS
+    df_sal = criar_datas_seguras(dados[[COL_SALARIO] + ["competencia"] if "competencia" in dados.columns else [COL_SALARIO]])
 
-    with st.spinner("Treinando modelos, isso pode levar alguns segundos..."):
-        modelo = treinar_e_escolher_melhor_modelo(df_sal)
+    st.subheader("Treinando modelos...")
+
+    modelo = treinar_e_escolher_melhor_modelo(df_sal)
 
     if modelo is None:
-        st.error("Dados insuficientes para treinar modelos.")
+        st.error("Dados insuficientes para treinamento.")
         st.stop()
 
     st.success(f"Modelo escolhido: **{modelo['modelo_nome']}** (RMSE: {modelo['rmse']:.2f})")
@@ -221,12 +228,4 @@ if escolha:
     previsao = prever(modelo["melhor_modelo"], modelo["modelo_nome"], df_sal)
 
     st.subheader("Previsão de até 20 anos")
-    # Gráfico Matplotlib
-    fig, ax = plt.subplots(figsize=(12,6))
-    ax.plot(df_sal["data"], df_sal["y"], label="Histórico")
-    ax.plot(previsao["data"], previsao["y"], label="Previsão", linestyle="--")
-    ax.set_title(f"Salário - {desc}")
-    ax.set_xlabel("Data")
-    ax.set_ylabel("Salário")
-    ax.legend()
-    st.pyplot(fig)
+    st.line_chart(previsao.set_index("data")["y"])
