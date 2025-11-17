@@ -39,7 +39,6 @@ def carregar_dados_cbo():
 def carregar_historico():
     df = pd.read_parquet("dados.parquet")
 
-    # Normalizar nomes de colunas
     cols_norm = {}
     for col in df.columns:
         col_norm = "".join(
@@ -47,6 +46,7 @@ def carregar_historico():
             if unicodedata.category(c) != "Mn"
         )
         cols_norm[col] = col_norm
+
     df.columns = cols_norm.values()
 
     col_cbo = next((c for c in df.columns if "cbo" in c), None)
@@ -67,7 +67,7 @@ def buscar_profissoes(df_cbo, texto):
     return df_cbo[df_cbo["Descrição_norm"].str.contains(tnorm, na=False)]
 
 # ----------------------------------------------------------
-# CRIAR COLUNA DE DATA DE FORMA INTELIGENTE
+# CRIAR COLUNA DE DATA — LIMITADO ENTRE 2020–2025
 # ----------------------------------------------------------
 def criar_datas_seguras(df):
     df_sal = df.copy()
@@ -81,23 +81,23 @@ def criar_datas_seguras(df):
         df_sal["data"] = pd.to_datetime(
             df_sal[col_ano].astype(str) + "-" + df_sal[col_mes].astype(str) + "-01"
         )
+        df_sal = df_sal[df_sal["data"].between("2020-01-01", "2025-12-31")]
         return df_sal[["data", "y"]]
 
-    # 2) Se existir 'competencia' tipo 202001
-    if "competencia" in df_sal.columns:
-        df_sal["data"] = pd.to_datetime(df_sal["competencia"].astype(str), format="%Y%m")
+    # 2) Se existir 'competenciamov' tipo 202001
+    if "competenciamov" in df_sal.columns:
+        df_sal["data"] = pd.to_datetime(df_sal["competenciamov"].astype(str), format="%Y%m")
+        df_sal = df_sal[df_sal["data"].between("2020-01-01", "2025-12-31")]
         return df_sal[["data", "y"]]
 
-    # 3) Criar datas artificiais entre 2020-01 e 2025-12
-    start_date = "2020-01-01"
-    end_date = "2025-12-01"
-    datas = pd.date_range(start=start_date, end=end_date, freq="MS")  # MS = início do mês
-
-    # Ajustar tamanho se precisar
-    if len(df_sal) > len(datas):
-        datas = list(datas) + [datas[-1]] * (len(df_sal) - len(datas))
-    else:
-        datas = datas[:len(df_sal)]
+    # 3) Criar datas artificiais limitadas (2020–2025)
+    n = len(df_sal)
+    datas = pd.date_range(
+        start="2020-01-01",
+        end="2025-12-01",
+        freq="M"
+    )
+    datas = list(datas)[:n]
 
     df_sal["data"] = datas
     return df_sal[["data", "y"]]
@@ -128,8 +128,8 @@ def treinar_e_escolher_melhor_modelo(df):
 
         rmse = np.sqrt(mean_squared_error(valid["y"].values, pred))
         results["prophet"] = (rmse, model_prophet)
-    except:
-        pass
+    except Exception as e:
+        print("Erro Prophet:", e)
 
     # XGBOOST
     try:
@@ -146,8 +146,8 @@ def treinar_e_escolher_melhor_modelo(df):
         pred = xgb.predict(valid_ml[["mes", "ano"]])
         rmse = np.sqrt(mean_squared_error(valid_ml["y"], pred))
         results["xgboost"] = (rmse, xgb)
-    except:
-        pass
+    except Exception as e:
+        print("Erro XGBoost:", e)
 
     if not results:
         return None
@@ -160,19 +160,19 @@ def treinar_e_escolher_melhor_modelo(df):
 # ----------------------------------------------------------
 # PREVISÃO
 # ----------------------------------------------------------
-def prever(modelo, modelo_nome, df, anos=20):
-    start = df["data"].max()
-
-    n_periods = anos * 12 + 1
-    datas = pd.date_range(start=start, periods=n_periods, freq="M")
+def prever(modelo, modelo_nome, df):
+    max_date = pd.Timestamp("2025-12-01")
 
     if modelo_nome == "prophet":
-        future = modelo.make_future_dataframe(periods=anos * 12, freq="M")
+        future = modelo.make_future_dataframe(periods=36, freq="M")  # 3 anos
         fc = modelo.predict(future)
-        return fc[["ds", "yhat"]].rename(columns={"ds": "data", "y"})
+        fc = fc[["ds", "yhat"]].rename(columns={"ds": "data", "yhat": "y"})
+        fc = fc[fc["data"] <= max_date]
+        return fc
 
     if modelo_nome == "xgboost":
-        temp = pd.DataFrame({"data": datas[1:]})
+        datas = pd.date_range(start=df["data"].max(), end=max_date, freq="M")
+        temp = pd.DataFrame({"data": datas})
         temp["mes"] = temp["data"].dt.month
         temp["ano"] = temp["data"].dt.year
         temp["y"] = modelo.predict(temp[["mes", "ano"]])
@@ -213,19 +213,26 @@ if escolha:
         st.stop()
 
     # CRIAR SÉRIE COM DATAS SEGURAS
-    df_sal = criar_datas_seguras(dados[[COL_SALARIO] + ["competencia"] if "competencia" in dados.columns else [COL_SALARIO]])
+    df_sal = criar_datas_seguras(dados[[COL_SALARIO]])
 
     st.subheader("Treinando modelos...")
 
     modelo = treinar_e_escolher_melhor_modelo(df_sal)
 
     if modelo is None:
-        st.error("Dados insuficientes para treinamento.")
+        st.error("Dados insuficientes.")
         st.stop()
 
     st.success(f"Modelo escolhido: **{modelo['modelo_nome']}** (RMSE: {modelo['rmse']:.2f})")
 
     previsao = prever(modelo["melhor_modelo"], modelo["modelo_nome"], df_sal)
 
-    st.subheader("Previsão de até 20 anos")
+    st.subheader("📈 Previsão até 2025")
     st.line_chart(previsao.set_index("data")["y"])
+
+    st.info("""
+### Interpretação do gráfico:
+- A linha representa a tendência evolutiva do salário médio da profissão.
+- A projeção (parte futura) aparece estendida até dezembro de 2025.
+- O modelo escolhido automaticamente foi aquele com **menor erro RMSE**.
+""")
