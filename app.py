@@ -4,7 +4,6 @@ import numpy as np
 import unicodedata
 
 from prophet import Prophet
-from pmdarima import auto_arima
 from sklearn.metrics import mean_squared_error
 from xgboost import XGBRegressor
 
@@ -69,7 +68,6 @@ def buscar_profissoes(df_cbo, texto):
 # ================================================================
 # MODELOS DE PREVISÃO
 # ================================================================
-
 def treinar_e_escolher_melhor_modelo(df):
     df = df.sort_values("data").dropna()
 
@@ -89,7 +87,7 @@ def treinar_e_escolher_melhor_modelo(df):
     # PROPHET
     # ------------------------------
     try:
-        prophet_df = train.rename(columns={"data": "ds", "y": "y"})
+        prophet_df = train.rename(columns={"data": "ds"})
         prophet_model = Prophet()
         prophet_model.fit(prophet_df)
 
@@ -99,20 +97,8 @@ def treinar_e_escolher_melhor_modelo(df):
 
         rmse_prophet = np.sqrt(mean_squared_error(y_valid, prophet_pred))
         results["prophet"] = (rmse_prophet, prophet_model)
-    except:
-        pass
-
-    # ------------------------------
-    # SARIMA
-    # ------------------------------
-    try:
-        sarima_model = auto_arima(train["y"], seasonal=True, m=12)
-        sarima_pred = sarima_model.predict(n_periods=len(valid))
-
-        rmse_sarima = np.sqrt(mean_squared_error(y_valid, sarima_pred))
-        results["sarima"] = (rmse_sarima, sarima_model)
-    except:
-        pass
+    except Exception as e:
+        print("Prophet falhou:", e)
 
     # ------------------------------
     # XGBOOST
@@ -131,8 +117,8 @@ def treinar_e_escolher_melhor_modelo(df):
         xgb_pred = xgb.predict(valid_ml[["mes", "ano"]])
         rmse_xgb = np.sqrt(mean_squared_error(valid_ml["y"], xgb_pred))
         results["xgboost"] = (rmse_xgb, xgb)
-    except:
-        pass
+    except Exception as e:
+        print("XGBoost falhou:", e)
 
     if not results:
         return None
@@ -146,19 +132,15 @@ def treinar_e_escolher_melhor_modelo(df):
         "rmse": melhor_rmse
     }
 
+
 # --------------------------------------------
-# PREVISÃO COM O MELHOR MODELO
+# PREVISÃO
 # --------------------------------------------
 def prever(melhor_modelo, modelo_nome, df, anos=20):
     if modelo_nome == "prophet":
         future = melhor_modelo.make_future_dataframe(periods=anos * 12, freq="M")
         forecast = melhor_modelo.predict(future)
-        return forecast[["ds", "yhat"]].rename(columns={"ds": "data", "yhat": "y"})
-
-    elif modelo_nome == "sarima":
-        pred = melhor_modelo.predict(n_periods=anos * 12)
-        datas = pd.date_range(start=df["data"].max(), periods=anos*12 + 1, freq="M")
-        return pd.DataFrame({"data": datas[1:], "y": pred})
+        return forecast.rename(columns={"ds": "data", "yhat": "y"})[["data", "y"]]
 
     elif modelo_nome == "xgboost":
         datas = pd.date_range(start=df["data"].max(), periods=anos*12 + 1, freq="M")
@@ -204,11 +186,14 @@ if escolha:
         st.error("Sem dados para esta profissão.")
         st.stop()
 
-    # Preparar série para modelagem
-    df_sal = pd.DataFrame({
-        "data": pd.to_datetime(dados_prof.index),  # se seu parquet já tiver data, ajuste aqui
-        "y": dados_prof[COL_SALARIO].values
-    })
+    # PREPARAR SÉRIE COM DATA SEGURA
+    df_sal = dados_prof[[COL_SALARIO]].copy()
+    df_sal["y"] = df_sal[COL_SALARIO]
+
+    # GERA DATAS MENSAL AUTOMÁTICAS — SEM ERRO DE DOM
+    df_sal["data"] = pd.date_range(start="2010-01-01", periods=len(df_sal), freq="M")
+
+    df_sal = df_sal[["data", "y"]]
 
     st.subheader("Treinando modelos...")
 
