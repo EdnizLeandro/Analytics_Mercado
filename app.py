@@ -16,7 +16,7 @@ Pesquise por profissão _digitando o nome completo ou parcial_ (ex: **pintor**, 
 @st.cache_data
 def carregar_dados():
     try:
-        df = pd.read_csv("cache_Jobin1.csv")
+        df = pd.read_csv("cache_Jobin_acrescimo_composto.csv")  # utilize o arquivo correto
         return df
     except Exception as e:
         st.error(f"Erro ao carregar os dados: {e}")
@@ -25,9 +25,8 @@ def carregar_dados():
 df = carregar_dados()
 
 if df is not None:
-    # Busca textual pela profissão
     termo = st.text_input(
-        "Digite parte do nome da profissão para buscar (exemplo: pintor):",
+        "Digite parte do nome da profissão para buscar:",
         placeholder="Exemplo: pintor"
     )
 
@@ -39,7 +38,6 @@ if df is not None:
             st.warning("Nenhuma profissão encontrada para o termo digitado. Tente outro termo.")
         else:
             st.write(f"**Foram encontrados {resultado_filtro.shape[0]} resultados para:** '{termo}'")
-            # Mostra tabela resumida de opções
             nomes_cbos = [
                 f"{row['codigo']} - {row['descricao']}"
                 for _, row in resultado_filtro.iterrows()
@@ -52,9 +50,8 @@ if df is not None:
             if cbo_str:
                 cbo_selecionado = int(cbo_str.split(' - ')[0])
     elif termo == "":
-        st.info("Digite parte do nome da profissão para começar a pesquisa. Exemplo: **pintor**")
+        st.info("Digite parte do nome da profissão para começar a pesquisa.")
 
-    # Se o usuário selecionou algum CBO válido
     if cbo_selecionado:
         info = resultado_filtro[resultado_filtro['codigo'] == cbo_selecionado].iloc[0]
         st.subheader(f"Profissão: {info['descricao']} (CBO {info['codigo']})")
@@ -63,7 +60,7 @@ if df is not None:
         with col1:
             st.metric(
                 label="Salário Médio Atual",
-                value=f"R$ {info['salario_medio_atual']:.2f}",
+                value=f"R$ {float(info['salario_medio_atual']):.2f}",
                 help="Salário médio considerado na base mais recente"
             )
             st.metric(
@@ -74,7 +71,7 @@ if df is not None:
         with col2:
             st.metric(
                 label="Score do Modelo",
-                value=f"{info['score']:.4f}",
+                value=f"{float(info['score']):.4f}",
                 help="Score baseado na variância das previsões (quanto mais próximo de 1, mais estável)"
             )
             st.metric(
@@ -83,14 +80,14 @@ if df is not None:
                 help="Projeção para crescimento ou retração do salário"
             )
 
-        # Visualização das previsões salariais
+        # Gráfico da projeção salarial
         st.markdown("#### Projeção Salarial (5/10/15/20 anos)")
         anos_futuro = ["+5 anos", "+10 anos", "+15 anos", "+20 anos"]
         salarios_futuro = [
-            info['previsao_5'],
-            info['previsao_10'],
-            info['previsao_15'],
-            info['previsao_20']
+            float(info['previsao_5']),
+            float(info['previsao_10']),
+            float(info['previsao_15']),
+            float(info['previsao_20'])
         ]
         fig = go.Figure(
             go.Scatter(
@@ -114,25 +111,23 @@ if df is not None:
             icon="📊"
         )
 
-        # Detalhes técnicos
         with st.expander("Detalhes Técnicos do Modelo"):
             st.write("Modelo vencedor, score, projeções salariais e interpretação das tendências.")
             st.json({
                 "Modelo Vencedor": info['modelo_vencedor'],
-                "Score": info['score'],
+                "Score": float(info['score']),
                 "Projeções Salariais": {
-                    "+5 anos": info["previsao_5"],
-                    "+10 anos": info["previsao_10"],
-                    "+15 anos": info["previsao_15"],
-                    "+20 anos": info["previsao_20"]
+                    "+5 anos": float(info["previsao_5"]),
+                    "+10 anos": float(info["previsao_10"]),
+                    "+15 anos": float(info["previsao_15"]),
+                    "+20 anos": float(info["previsao_20"])
                 },
                 "Tendência Salarial": info["tendencia_salarial"],
                 "Tendência Mercado": info["tendencia_mercado"]
             })
 else:
-    st.error("Dados não carregados. Verifique o arquivo 'cache_Jobin.csv'.")
+    st.error("Dados não carregados. Verifique o arquivo 'cache_Jobin_acrescimo_composto.csv'.")
 
-# Rodapé
 st.markdown(
     "<hr style='margin-top:2em;margin-bottom:1em;'>"
     "<div style='text-align:center; color:grey;'>"
