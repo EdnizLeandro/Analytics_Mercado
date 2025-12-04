@@ -2,121 +2,145 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objs as go
 
-# Estilo moderno Jobin
-
-def css():
+# ---------------- CONFIGURAÇÃO DE ESTILO PROFISSIONAL ----------------
+def global_style():
     st.markdown("""
-    <style>
-        .main > div {
-            background: linear-gradient(135deg, #EC008C 0%, #673AB7 100%);
-            padding: 25px;
-            border-radius: 14px;
+        <style>
+        .main {
+            background: #f7f7fa !important;
         }
         h1 {
-            color: white !important;
-            font-size: 34px;
-            font-weight: 900;
-        }
-        .indicador-box {
-            background: rgba(255,255,255,0.25);
+            color: #ffffff !important;
+            background: linear-gradient(135deg, #7b2ff7, #f107a3);
             padding: 18px;
-            border-radius: 12px;
+            border-radius: 14px;
             text-align: center;
-            font-weight: 600;
-            color: white;
-            font-size: 1.05rem;
+            font-weight: 900;
+            margin-bottom: 25px;
         }
-        .tendencia {
-            padding: 14px;
+        .card {
+            background: rgba(255,255,255,0.55);
+            backdrop-filter: blur(10px);
+            border-radius: 14px;
+            padding: 18px;
+            text-align: center;
+            box-shadow: 0px 5px 14px rgba(0,0,0,0.08);
+            font-weight: 600;
+            color: #333;
+        }
+        .card .label {
+            font-size: 0.8rem;
+            opacity: 0.7;
+        }
+        .badge {
+            padding: 10px 14px;
             border-radius: 10px;
             font-weight: bold;
-            font-size: 1.2rem;
-            text-align: center;
-            margin-top: 15px;
+            font-size: 1rem;
+            display: inline-block;
+            margin-bottom: 8px;
         }
         .footer {
-            text-align: center;
-            color: #eee;
-            margin-top: 30px;
+            text-align:center;
+            font-size: 12px;
+            color: #666;
+            margin-top: 35px;
         }
-    </style>
+        </style>
     """, unsafe_allow_html=True)
 
-css()
+global_style()
 
-st.set_page_config(page_title="Jobin - Salários & Mercado", layout="centered")
+st.set_page_config(page_title="Jobin - Mercado de Trabalho", layout="centered")
 
-st.title("🔎 Jobin Inteligente - Salários & Tendências do Mercado")
-st.write("Pesquise uma profissão e visualize o futuro dela no Brasil.")
+st.title("Jobin Inteligente – Salários & Tendências do Mercado")
 
 @st.cache_data
-def load():
+def load_data():
     return pd.read_csv("cache_Jobin1.csv")
 
-df = load()
+df = load_data()
 
-termo = st.text_input("Digite parte do nome da profissão:", placeholder="Ex: Analista")
+st.write("Digite uma profissão e visualize projeções de salário e demanda:")
 
-if termo:
-    resultados = df[df["descricao"].str.contains(termo, case=False, na=False)]
+term = st.text_input("Profissão:", placeholder="Ex.: Desenvolvedor")
 
-    if resultados.empty:
-        st.warning("Nenhuma profissão encontrada.")
+if term:
+    filt = df[df["descricao"].str.contains(term, case=False, na=False)]
+
+    if filt.empty:
+        st.warning("Nenhuma profissão encontrada para esse termo.")
     else:
-        opcao = st.selectbox("Selecione o CBO:", resultados.apply(lambda x: f"{x['codigo']} - {x['descricao']}", axis=1))
+        select = st.selectbox(
+            "Escolha o CBO:",
+            filt.apply(lambda x: f"{x['codigo']} - {x['descricao']}", axis=1)
+        )
+        cbo = int(select.split(" - ")[0])
+        info = filt[filt["codigo"] == cbo].iloc[0]
 
-        codigo = int(opcao.split(" - ")[0])
-        info = resultados[resultados["codigo"] == codigo].iloc[0]
+        st.subheader(f"{info['descricao']} • CBO {cbo}")
 
-        st.subheader(f"{info['descricao']} • CBO {codigo}")
-
-        # Indicadores
+        # ---------------- INDICADORES EM CARDS ----------------
         col1, col2, col3, col4 = st.columns(4)
-        col1.markdown(f"<div class='indicador-box'>💰<br>R$ {info['salario_medio_atual']:.2f}<br><small>Salário Médio</small></div>", unsafe_allow_html=True)
-        col2.markdown(f"<div class='indicador-box'>🧠<br>{info['modelo_vencedor']}<br><small>Modelo</small></div>", unsafe_allow_html=True)
-        col3.markdown(f"<div class='indicador-box'>📊<br>{info['score']:.3f}<br><small>Score</small></div>", unsafe_allow_html=True)
 
-        # Tendência do mercado (nova lógica)
+        col1.markdown(f"<div class='card'><div>💰</div>R$ {info['salario_medio_atual']:.2f}<br><span class='label'>Salário Médio</span></div>", unsafe_allow_html=True)
+        col2.markdown(f"<div class='card'><div>🧠</div>{info['modelo_vencedor']}<br><span class='label'>Modelo</span></div>", unsafe_allow_html=True)
+        col3.markdown(f"<div class='card'><div>📊</div>{info['score']:.3f}<br><span class='label'>Score</span></div>", unsafe_allow_html=True)
+        
+        # Tendência do mercado com ícone e cor profissional
         tendencia_raw = str(info.get("tendencia_mercado", "")).lower()
         if "alta" in tendencia_raw:
-            icon, cor = "🔥", "#00e676"
+            color = "#4CAF50"
+            icon = "📈"
         elif "baixa" in tendencia_raw:
-            icon, cor = "⚠️", "#ff5252"
-        elif "estável" in tendencia_raw:
-            icon, cor = "ℹ️", "#2196F3"
+            color = "#FF5252"
+            icon = "📉"
         else:
-            icon, cor = "📌", "#ffffff"
+            color = "#FFC107"
+            icon = "⚖️"
 
         col4.markdown(
-            f"<div class='indicador-box' style='background:{cor}cc;'>{icon}<br>{info['tendencia_mercado']}<br><small>Mercado</small></div>",
+            f"<div class='card'><div>{icon}</div>{info['tendencia_mercado']}<br><span class='label'>Demanda do Mercado</span></div>",
             unsafe_allow_html=True
         )
 
-        # Projeções salariais
+        # ---------------- PROJEÇÃO SALARIAL ----------------
         anos = ["+5 anos", "+10 anos", "+15 anos", "+20 anos"]
-        valores = [info["previsao_5"], info["previsao_10"], info["previsao_15"], info["previsao_20"]]
+        valores = [
+            info["previsao_5"], info["previsao_10"],
+            info["previsao_15"], info["previsao_20"]
+        ]
 
         crescimento = ((valores[-1] - valores[0]) / valores[0]) * 100
 
         if crescimento > 15:
-            mensagem = f"🚀 Crescimento Acelerado ({crescimento:.1f}%)"
-            cor_t = "#00e676"
+            trend_color = "#4CAF50"
+            trend_msg = f"📈 Crescimento Acelerado ({crescimento:.1f}%)"
         elif crescimento > 2:
-            mensagem = f"📈 Crescimento Moderado ({crescimento:.1f}%)"
-            cor_t = "#ffeb3b"
+            trend_color = "#00BCD4"
+            trend_msg = f"📈 Crescimento Moderado ({crescimento:.1f}%)"
         elif crescimento > -2:
-            mensagem = f"⚖️ Estável ({crescimento:.1f}%)"
-            cor_t = "#ffffff"
+            trend_color = "#9E9E9E"
+            trend_msg = f"⚖️ Estável ({crescimento:.1f}%)"
         else:
-            mensagem = f"📉 Queda Salarial ({crescimento:.1f}%)"
-            cor_t = "#ff5252"
+            trend_color = "#FF5252"
+            trend_msg = f"📉 Queda Salarial ({crescimento:.1f}%)"
 
-        fig = go.Figure(go.Scatter(x=anos, y=valores, mode="lines+markers", line=dict(width=4)))
-        fig.update_layout(title="Evolução Salarial", template="plotly_white")
+        fig = go.Figure(go.Scatter(
+            x=anos, y=valores,
+            mode="lines+markers",
+            line=dict(width=4)
+        ))
+        fig.update_layout(
+            title="Projeção Salarial",
+            template="plotly_white",
+            yaxis_title="Salário (R$)",
+            xaxis_title="Horizonte"
+        )
         st.plotly_chart(fig, use_container_width=True)
 
         st.markdown(
-            f"<div class='tendencia' style='background:{cor_t};'>{mensagem}</div>",
+            f"<div class='badge' style='background:{trend_color};color:white;'>{trend_msg}</div>",
             unsafe_allow_html=True
         )
 
