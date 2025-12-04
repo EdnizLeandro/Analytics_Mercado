@@ -12,18 +12,15 @@ st.set_page_config(
 # Estilos personalizados 🎨
 custom_css = """
 <style>
-    /* Fundo geral */
     .main {
         background-color: #f8f9fc;
     }
 
-    /* Caixa de inputs */
     .stTextInput > div > div > input {
         border-radius: 10px;
         border: 1px solid #B9B9B9;
     }
 
-    /* Métricas */
     .stMetric {
         background: linear-gradient(135deg, #7b2ff7, #f107a3);
         color: white !important;
@@ -32,7 +29,6 @@ custom_css = """
         text-align: center;
     }
 
-    /* Títulos */
     h1 {
         font-weight: 800;
         background: -webkit-linear-gradient(#7b2ff7, #f107a3);
@@ -40,7 +36,6 @@ custom_css = """
         -webkit-text-fill-color: transparent;
     }
 
-    /* Caixa rodapé */
     .footer {
         font-size: 14px;
         opacity: 0.6;
@@ -70,6 +65,7 @@ df = carregar_dados()
 
 # ========== BUSCA ==========
 if df is not None:
+    
     termo = st.text_input(
         "🔍 Pesquisar profissão:",
         placeholder="Digite parte do nome... ex: Analista"
@@ -80,8 +76,10 @@ if df is not None:
     
     if termo:
         resultado_filtro = df[df['descricao'].str.contains(termo, case=False, na=False)]
+        
         if resultado_filtro.empty:
             st.warning("Nenhuma profissão encontrada. Tente outro termo 👀")
+        
         else:
             st.success(f"{resultado_filtro.shape[0]} profissões encontradas!")
 
@@ -101,25 +99,53 @@ if df is not None:
 
         # ========== CARDS DE MÉTRICAS ==========
         col1, col2, col3, col4 = st.columns(4)
+        
         col1.metric("Salário Médio Atual", f"R$ {info['salario_medio_atual']:.2f}")
         col2.metric("Modelo de Previsão", info['modelo_vencedor'])
         col3.metric("Score do Modelo", f"{info['score']:.3f}")
-        col4.metric("Tendência Salarial", info['tendencia_salarial'])
+
+        # ===== Tendência Salarial Inteligente =====
+        sal_atual = float(info['salario_medio_atual'])
+        projecoes = [
+            float(info['previsao_5']),
+            float(info['previsao_10']),
+            float(info['previsao_15']),
+            float(info['previsao_20'])
+        ]
+
+        variacao_total = ((projecoes[-1] - sal_atual) / sal_atual) * 100
+
+        if variacao_total >= 8:
+            tendencia_label = "Crescimento Acelerado"
+            tendencia_icon = "🔺"
+        elif 0 < variacao_total < 8:
+            tendencia_label = "Crescimento"
+            tendencia_icon = "⬆️"
+        elif -3 <= variacao_total <= 3:
+            tendencia_label = "Estabilidade"
+            tendencia_icon = "➖"
+        elif -8 < variacao_total < -3:
+            tendencia_label = "Leve Queda"
+            tendencia_icon = "⬇️"
+        else:
+            tendencia_label = "Queda Acentuada"
+            tendencia_icon = "🔻"
+
+        col4.metric(
+            label="Tendência Salarial",
+            value=f"{tendencia_icon} {tendencia_label}",
+            help=f"Variação prevista em 20 anos: {variacao_total:.1f}%"
+        )
 
         # ========== GRÁFICO ==========
         anos = ["+5 anos", "+10 anos", "+15 anos", "+20 anos"]
-        salarios = [
-            info['previsao_5'],
-            info['previsao_10'],
-            info['previsao_15'],
-            info['previsao_20']
-        ]
 
         fig = go.Figure(go.Scatter(
-            x=anos, y=salarios,
+            x=anos, y=projecoes,
             mode="lines+markers",
             marker={"size": 12},
         ))
+        
         fig.update_layout(
             title=f"📈 Projeção Salarial para {info['descricao']}",
             xaxis_title="Horizonte de Tempo",
@@ -133,6 +159,7 @@ if df is not None:
         st.info(
             f"📊 **Tendência do Mercado**: {info['tendencia_mercado']}"
         )
+
 else:
     st.error("Não foi possível carregar os dados. Verifique o arquivo CSV.")
 
