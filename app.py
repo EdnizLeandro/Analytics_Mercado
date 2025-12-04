@@ -1,182 +1,100 @@
 import streamlit as st
 import pandas as pd
-import plotly.graph_objs as go
-import math
+import plotly.express as px
+from streamlit_lottie import st_lottie
 
-# ===================== CONFIGURAÇÃO DA PÁGINA =====================
+# ================= CONFIGURAÇÃO DA PÁGINA ================
 st.set_page_config(
-    page_title="Jobin - Salários & Tendências",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    page_title="Jobin Inteligente - Salários",
+    layout="wide"
 )
 
-# ===================== CSS & VISUAL =====================
+# ================= LEITURA DOS DADOS =====================
+df = pd.read_csv("cache_Jobin1.csv")
+
+media_salarial = df["salary"].mean()
+score_modelo = 0.968  # Mantido como informado
+tendencia_20anos = 12.2  # Crescimento estimado conforme gráfico
+
+# ================= CABEÇALHO =============================
 st.markdown(
     """
-    <style>
-    .reportview-container .main {
-        background: #f5f7fb;
-        padding-top: 12px;
-        padding-bottom: 30px;
-    }
-    .title-banner {
-        background: linear-gradient(90deg,#7b2ff7 0%, #f107a3 100%);
-        padding: 18px 22px;
-        border-radius: 12px;
-        color: white;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        box-shadow: 0 6px 18px rgba(23,0,102,0.12);
-        margin-bottom: 18px;
-    }
-    .title-banner h1 {
-        margin: 0;
-        font-size: 20px;
-        font-weight: 900;
-        color: white;
-    }
-    .subtitle {
-        margin: 0;
-        color: #f1e7ff;
-        opacity: 0.95;
-        font-size: 13px;
-    }
-    .card {
-        background: rgba(255,255,255,0.7);
-        border-radius: 12px;
-        padding: 14px;
-        text-align: center;
-        box-shadow: 0 6px 18px rgba(15,15,20,0.04);
-        min-height: 110px;
-    }
-    .card .icon {
-        font-size: 26px;
-        margin-bottom: 6px;
-    }
-    .card .value {
-        font-size: 18px;
-        font-weight: 800;
-        color: #111827;
-    }
-    .card .label {
-        display:block;
-        font-size: 12px;
-        color: #6b7280;
-        margin-top: 6px;
-        font-weight:600;
-    }
-    .muted {
-        font-size: 12px;
-        color: #6b7280;
-    }
-    .footer {
-        text-align:center;
-        color:#9aa0b4;
-        font-size:13px;
-        margin-top:30px;
-    }
-    </style>
-    """, unsafe_allow_html=True
+    <h2 style="color:white; text-align:center;">
+        🔎 Jobin Inteligente — Salários & Tendências do Mercado
+    </h2>
+    """,
+    unsafe_allow_html=True
 )
 
-# ===================== BANNER =====================
+st.write("")  # espaçamento
+
+# ================= CARDS SUPERIORES ======================
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    st.markdown(
+        f"""
+        <div style="background:#1E1E1E; padding:18px; border-radius:14px; text-align:center;">
+            <h4 style="color:#FFD95A;">💰 Salário Médio</h4>
+            <h3 style="color:#ffffff;">R$ {media_salarial:.2f}</h3>
+        </div>
+        """, unsafe_allow_html=True
+    )
+
+with col2:
+    st.markdown(
+        f"""
+        <div style="background:#1E1E1E; padding:18px; border-radius:14px; text-align:center;">
+            <h4 style="color:#4DD4AC;">📊 Modelo</h4>
+            <h3 style="color:white;">XGBoost</h3>
+        </div>
+        """, unsafe_allow_html=True
+    )
+
+with col3:
+    st.markdown(
+        f"""
+        <div style="background:#1E1E1E; padding:18px; border-radius:14px; text-align:center;">
+            <h4 style="color:#6EB6FF;">🎯 Score</h4>
+            <h3 style="color:white;">{score_modelo:.3f}</h3>
+        </div>
+        """, unsafe_allow_html=True
+    )
+
+st.write("")
+
+# ================= GRÁFICO DE PROJEÇÃO SALARIAL ==========
+df_proj = df.groupby("years_experience")["salary"].mean().reset_index()
+fig_proj = px.line(
+    df_proj,
+    x="years_experience",
+    y="salary",
+    title="📈 Projeção Salarial por Experiência",
+)
+fig_proj.update_layout(
+    title_font_size=20,
+    plot_bgcolor="#0E1117",
+    paper_bgcolor="#0E1117",
+    font_color="white"
+)
+st.plotly_chart(fig_proj, use_container_width=True)
+
+# ================= CARD DE TENDÊNCIA =====================
 st.markdown(
-    """
-    <div class="title-banner">
-        <div>
-            <h1>🔎 Jobin Inteligente - Salários & Tendências do Mercado de Trabalho</h1>
-            <div class="subtitle">Pesquise profissões, veja projeções salariais e demanda do mercado.</div>
-        </div>
-        <div style="text-align:right;font-size:13px;color:#fff;opacity:0.9;">
-            © 2025 Jobin Analytics
-        </div>
+    f"""
+    <div style="background:linear-gradient(90deg,#0A324B,#1B4965); 
+                padding:22px; border-radius:14px; margin-top:15px;">
+        <h3 style="color:white; margin:0;">
+            🚀 Crescimento Moderado (≈ {tendencia_20anos:.1f}% em 20 anos)
+        </h3>
+        <p style="color:#D9EFFF; font-size:16px; margin-top:8px;">
+            O mercado para esta área mantém um crescimento estrutural estável,
+            impulsionado por tecnologia, automação e maior demanda por habilidades digitais.
+            Expectativa positiva para quem inicia agora sua carreira.
+        </p>
     </div>
     """,
     unsafe_allow_html=True
 )
 
-# ===================== DADOS =====================
-@st.cache_data
-def carregar_dados(path="cache_Jobin1.csv"):
-    try:
-        return pd.read_csv(path)
-    except:
-        return None
-
-df = carregar_dados()
-
-if df is None:
-    st.error("Arquivo 'cache_Jobin1.csv' não encontrado.")
-    st.stop()
-
-st.markdown("**Busque por profissão (nome parcial ou completo):**")
-termo = st.text_input("", placeholder="Ex.: Analista, Enfermeiro…")
-
-if termo:
-    resultados = df[df["descricao"].str.contains(termo, case=False, na=False)]
-    
-    if resultados.empty:
-        st.warning("Nenhuma profissão encontrada.")
-    else:
-        st.success(f"{len(resultados)} encontrados")
-        escolha = st.selectbox(
-            "Selecione a profissão:",
-            resultados.apply(lambda x: f"{int(x['codigo'])} - {x['descricao']}", axis=1)
-        )
-
-        cbo = int(escolha.split(" - ")[0])
-        info = resultados[resultados["codigo"] == cbo].iloc[0]
-
-        st.markdown(f"### {info['descricao']}  •  CBO {cbo}")
-        st.markdown("<span class='muted'>Base Jobin + Novo CAGED</span>", unsafe_allow_html=True)
-        st.write("")
-
-        # ===== CARDS =====
-        col1, col2, col3, col4 = st.columns(4, gap="large")
-        salario = float(info.get("salario_medio_atual", 0.0))
-        modelo  = str(info.get("modelo_vencedor", "—"))
-        score   = float(info.get("score", 0.0))
-        mercado = str(info.get("tendencia_mercado", ""))
-
-        card_tpl = lambda icon, val, label: f"""
-            <div class="card">
-                <div class="icon">{icon}</div>
-                <div class="value">{val}</div>
-                <span class="label">{label}</span>
-            </div>
-        """
-
-        col1.markdown(card_tpl("💰", f"R$ {salario:,.2f}", "Salário Médio"), unsafe_allow_html=True)
-        col2.markdown(card_tpl("🧠", modelo, "Modelo"), unsafe_allow_html=True)
-        col3.markdown(card_tpl("📊", f"{score:.3f}", "Score"), unsafe_allow_html=True)
-        col4.markdown(card_tpl("📈", mercado if mercado else "N/A", "Mercado"), unsafe_allow_html=True)
-
-        st.write("")
-
-        # ===== PROJEÇÕES =====
-        st.markdown("#### 📊 Projeção Salarial: +5, +10, +15, +20 anos")
-
-        anos = ["+5 anos", "+10 anos", "+15 anos", "+20 anos"]
-        vals = [
-            float(info.get("previsao_5", 0.0)),
-            float(info.get("previsao_10", 0.0)),
-            float(info.get("previsao_15", 0.0)),
-            float(info.get("previsao_20", 0.0))
-        ]
-
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=anos, y=vals, mode="lines+markers",
-            marker=dict(size=10), line=dict(width=3, color="#7b2ff7")
-        ))
-        fig.update_layout(
-            template="plotly_white",
-            height=420,
-            margin=dict(t=25, r=20, l=40, b=10),
-            xaxis_title="Horizonte",
-            yaxis_title="Salário (R$)"
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-st.markdown("<div class='footer'>Jobin Analytics © 2025</div>", unsafe_allow_html=True)
+st.write("")
